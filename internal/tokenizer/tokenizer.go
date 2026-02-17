@@ -86,10 +86,9 @@ func SPMatcher() tokenizer.Matcher {
 func VersionMatcher() tokenizer.Matcher {
 	return func(stream tokenizer.Stream) *tokenizer.Token {
 		// Try to match "HTTP/"
-		prefix := []rune("HTTP/")
 		var value []rune
 
-		for _, expected := range prefix {
+		for _, expected := range "HTTP/" {
 			r, ok := stream.PeekChar()
 			if !ok || r != expected {
 				return nil

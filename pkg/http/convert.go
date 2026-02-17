@@ -1,11 +1,7 @@
 package http
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/shapestone/shape-core/pkg/ast"
-	"github.com/shapestone/shape-http/internal/fastparser"
 	"github.com/shapestone/shape-http/internal/parser"
 )
 
@@ -104,52 +100,4 @@ func pubHeadersToNode(headers Headers) ast.SchemaNode {
 		}, zeroPos)
 	}
 	return ast.NewArrayDataNode(elements, zeroPos)
-}
-
-// nodeToInternalHeaders converts an AST headers array to internal fastparser headers.
-func nodeToInternalHeaders(node ast.SchemaNode) ([]fastparser.Header, error) {
-	arr, ok := node.(*ast.ArrayDataNode)
-	if !ok {
-		return nil, fmt.Errorf("expected ArrayDataNode for headers, got %T", node)
-	}
-	elements := arr.Elements()
-	headers := make([]fastparser.Header, 0, len(elements))
-	for _, elem := range elements {
-		obj, ok := elem.(*ast.ObjectNode)
-		if !ok {
-			continue
-		}
-		props := obj.Properties()
-		var h fastparser.Header
-		if v, ok := props["key"]; ok {
-			if lit, ok := v.(*ast.LiteralNode); ok {
-				h.Key, _ = lit.Value().(string)
-			}
-		}
-		if v, ok := props["value"]; ok {
-			if lit, ok := v.(*ast.LiteralNode); ok {
-				h.Value, _ = lit.Value().(string)
-			}
-		}
-		headers = append(headers, h)
-	}
-	return headers, nil
-}
-
-// nodeToStatusCode extracts the status code from a literal node.
-func nodeToStatusCode(node ast.SchemaNode) int {
-	lit, ok := node.(*ast.LiteralNode)
-	if !ok {
-		return 0
-	}
-	switch code := lit.Value().(type) {
-	case int64:
-		return int(code)
-	case float64:
-		return int(code)
-	case string:
-		n, _ := strconv.Atoi(code)
-		return n
-	}
-	return 0
 }

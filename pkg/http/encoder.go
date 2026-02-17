@@ -37,7 +37,7 @@ func appendRequest(buf []byte, req *Request) ([]byte, error) {
 
 // appendResponse serializes a Response to HTTP/1.1 wire format.
 // It appends "VERSION STATUS REASON\r\n" followed by headers and body.
-func appendResponse(buf []byte, resp *Response) ([]byte, error) {
+func appendResponse(buf []byte, resp *Response) []byte {
 	version := resp.Version
 	if version == "" {
 		version = "HTTP/1.1"
@@ -58,7 +58,7 @@ func appendResponse(buf []byte, resp *Response) ([]byte, error) {
 		buf = append(buf, resp.Body...)
 	}
 
-	return buf, nil
+	return buf
 }
 
 // appendHeaders appends all headers in "Key: Value\r\n" format.

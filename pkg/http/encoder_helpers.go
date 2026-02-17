@@ -2,9 +2,6 @@ package http
 
 import "strconv"
 
-// CRLF is the HTTP line ending.
-var crlf = []byte("\r\n")
-
 // appendCRLF appends \r\n to buf.
 func appendCRLF(buf []byte) []byte {
 	return append(buf, '\r', '\n')

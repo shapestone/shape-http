@@ -214,23 +214,9 @@ func TestHeaders_IsChunked(t *testing.T) {
 }
 
 func TestMessage_Interface(t *testing.T) {
-	// Verify Request implements Message
-	var _ Message = &Request{
-		Method:  "GET",
-		Path:    "/",
-		Version: "HTTP/1.1",
-		Headers: Headers{{Key: "Host", Value: "example.com"}},
-		Body:    []byte("body"),
-	}
-
-	// Verify Response implements Message
-	var _ Message = &Response{
-		Version:    "HTTP/1.1",
-		StatusCode: 200,
-		Reason:     "OK",
-		Headers:    Headers{{Key: "Content-Type", Value: "text/plain"}},
-		Body:       []byte("body"),
-	}
+	// Verify *Request and *Response implement Message at compile time.
+	var _ Message = (*Request)(nil)
+	var _ Message = (*Response)(nil)
 }
 
 func TestRequest_MessageMethods(t *testing.T) {

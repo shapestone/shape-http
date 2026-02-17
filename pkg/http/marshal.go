@@ -37,18 +37,17 @@ func Marshal(v interface{}) ([]byte, error) {
 	switch msg := v.(type) {
 	case *Request:
 		buf, err = appendRequest(buf, msg)
+		if err != nil {
+			*bp = buf
+			bufPool.Put(bp)
+			return nil, err
+		}
 	case *Response:
-		buf, err = appendResponse(buf, msg)
+		buf = appendResponse(buf, msg)
 	default:
 		*bp = buf
 		bufPool.Put(bp)
 		return nil, fmt.Errorf("http: Marshal unsupported type %T (expected *Request or *Response)", v)
-	}
-
-	if err != nil {
-		*bp = buf
-		bufPool.Put(bp)
-		return nil, err
 	}
 
 	result := make([]byte, len(buf))
