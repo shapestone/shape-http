@@ -1,0 +1,79 @@
+(* HTTP/1.1 Message Grammar — Based on RFC 9112 *)
+(* This grammar describes the wire format of HTTP/1.1 messages *)
+
+HTTPMessage   = Request | Response ;
+
+(* Request = request-line *( header-field CRLF ) CRLF [ message-body ] *)
+Request       = RequestLine *HeaderField CRLF Body ;
+
+(* Response = status-line *( header-field CRLF ) CRLF [ message-body ] *)
+Response      = StatusLine *HeaderField CRLF Body ;
+
+(* request-line = method SP request-target SP HTTP-version CRLF *)
+RequestLine   = Method SP RequestTarget SP HTTPVersion CRLF ;
+
+(* status-line = HTTP-version SP status-code SP [ reason-phrase ] CRLF *)
+StatusLine    = HTTPVersion SP StatusCode SP ReasonPhrase CRLF ;
+
+(* method = token *)
+Method        = Token ;
+
+(* request-target = origin-form / absolute-form / authority-form / asterisk-form *)
+RequestTarget = { VCHAR } ;
+
+(* HTTP-version = HTTP-name "/" DIGIT "." DIGIT *)
+(* HTTP-name = %x48.54.54.50 ; HTTP *)
+HTTPVersion   = "HTTP/" DIGIT "." DIGIT ;
+
+(* status-code = 3DIGIT *)
+StatusCode    = DIGIT DIGIT DIGIT ;
+
+(* reason-phrase = *( HTAB / SP / VCHAR / obs-text ) *)
+ReasonPhrase  = { HTAB | SP | VCHAR | ObsText } ;
+
+(* header-field = field-name ":" OWS field-value OWS CRLF *)
+HeaderField   = FieldName ":" OWS FieldValue OWS CRLF ;
+
+(* field-name = token *)
+FieldName     = Token ;
+
+(* field-value = *field-content *)
+(* field-content = field-vchar [ 1*( SP / HTAB / field-vchar ) field-vchar ] *)
+FieldValue    = { FieldVChar | SP | HTAB } ;
+
+(* obs-fold = OWS CRLF RWS  — deprecated continuation lines *)
+ObsFold       = OWS CRLF ( SP | HTAB ) ;
+
+(* message-body = *OCTET *)
+Body          = { OCTET } ;
+
+(* Chunked Transfer Encoding *)
+ChunkedBody   = *Chunk LastChunk TrailerSection CRLF ;
+Chunk         = ChunkSize [ ChunkExt ] CRLF ChunkData CRLF ;
+ChunkSize     = HexDigit { HexDigit } ;
+ChunkExt      = *( ";" ChunkExtName [ "=" ChunkExtVal ] ) ;
+ChunkExtName  = Token ;
+ChunkExtVal   = Token | QuotedString ;
+ChunkData     = { OCTET } ;  (* exactly chunk-size octets *)
+LastChunk     = "0" [ ChunkExt ] CRLF ;
+TrailerSection = *( HeaderField ) ;
+
+(* Terminal definitions *)
+Token         = { TChar } ;
+TChar         = "!" | "#" | "$" | "%" | "&" | "'" | "*" | "+" | "-" | "."
+              | "^" | "_" | "`" | "|" | "~" | DIGIT | ALPHA ;
+ALPHA         = "A" | "B" | ... | "Z" | "a" | "b" | ... | "z" ;
+DIGIT         = "0" | "1" | ... | "9" ;
+HexDigit      = DIGIT | "A" | "B" | "C" | "D" | "E" | "F"
+              | "a" | "b" | "c" | "d" | "e" | "f" ;
+VCHAR         = %x21-7E ;  (* visible ASCII *)
+OCTET         = %x00-FF ;
+SP            = %x20 ;
+HTAB          = %x09 ;
+OWS           = *( SP | HTAB ) ;  (* optional whitespace *)
+RWS           = ( SP | HTAB ) { SP | HTAB } ;  (* required whitespace *)
+CRLF          = %x0D %x0A ;  (* \r\n *)
+ObsText       = %x80-FF ;
+QuotedString  = '"' { QDText | QuotedPair } '"' ;
+QDText        = HTAB | SP | "!" | %x23-5B | %x5D-7E | ObsText ;
+QuotedPair    = "\" ( HTAB | SP | VCHAR | ObsText ) ;

@@ -1,0 +1,120 @@
+package http
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestUnmarshalLenient_ValidRequest(t *testing.T) {
+	data := []byte("GET /api HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Method != "GET" {
+		t.Errorf("Method = %q, want GET", result.Request.Method)
+	}
+	if result.Partial {
+		t.Error("expected Partial=false")
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", result.Warnings)
+	}
+}
+
+func TestUnmarshalLenient_ValidResponse(t *testing.T) {
+	data := []byte("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello")
+	result := UnmarshalLenient(data)
+
+	if result.Response == nil {
+		t.Fatal("expected response")
+	}
+	if result.Response.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", result.Response.StatusCode)
+	}
+	if string(result.Response.Body) != "Hello" {
+		t.Errorf("Body = %q, want Hello", string(result.Response.Body))
+	}
+}
+
+func TestUnmarshalLenient_MissingVersion(t *testing.T) {
+	data := []byte("GET /path\r\nHost: example.com\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Version != "HTTP/1.1" {
+		t.Errorf("Version = %q, want HTTP/1.1 (default)", result.Request.Version)
+	}
+	hasWarning := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "missing HTTP version") {
+			hasWarning = true
+		}
+	}
+	if !hasWarning {
+		t.Errorf("expected warning about missing version, got %v", result.Warnings)
+	}
+}
+
+func TestUnmarshalLenient_TruncatedBody(t *testing.T) {
+	data := []byte("POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\npartial data")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if string(result.Request.Body) != "partial data" {
+		t.Errorf("Body = %q, want 'partial data'", string(result.Request.Body))
+	}
+	if !result.Partial {
+		t.Error("expected Partial=true for truncated body")
+	}
+}
+
+func TestUnmarshalLenient_MalformedHeaders(t *testing.T) {
+	data := []byte("GET / HTTP/1.1\r\nHost: ok.com\r\nBad Line Without Colon\r\nAccept: text/html\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	// Malformed header should be skipped
+	if len(result.Request.Headers) != 2 {
+		t.Errorf("Headers count = %d, want 2 (malformed one skipped)", len(result.Request.Headers))
+	}
+}
+
+func TestUnmarshalLenient_InvalidStatusCode(t *testing.T) {
+	data := []byte("HTTP/1.1 xyz OK\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Response == nil {
+		t.Fatal("expected response")
+	}
+	if result.Response.StatusCode != 0 {
+		t.Errorf("StatusCode = %d, want 0 for invalid code", result.Response.StatusCode)
+	}
+}
+
+func TestUnmarshalLenient_EmptyInput(t *testing.T) {
+	result := UnmarshalLenient([]byte{})
+	if !result.Partial {
+		t.Error("expected Partial=true for empty input")
+	}
+}
+
+func TestUnmarshalLenient_WhitespaceBeforeColon(t *testing.T) {
+	data := []byte("GET / HTTP/1.1\r\nContent-Type : text/html\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	// Lenient should accept and trim whitespace before colon
+	if result.Request.Headers.Get("Content-Type") != "text/html" {
+		t.Errorf("Content-Type = %q, want text/html", result.Request.Headers.Get("Content-Type"))
+	}
+}
