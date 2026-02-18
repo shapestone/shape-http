@@ -670,6 +670,219 @@ func TestLenient_ContentLength_BodyShorter(t *testing.T) {
 	}
 }
 
+// ── CR-3: bare host:port in header section ─────────────────────────────────
+
+func TestLenient_CR3_BareHostPort(t *testing.T) {
+	// "example.com:8080" in the header section has a colon, so it is parsed by
+	// the normal key:value path first. CR-3 then detects that the key looks
+	// like a hostname (contains a dot, hostname chars only) and the value is
+	// an all-digit port, and re-emits it as Host: example.com:8080.
+	data := []byte("POST /api/users HTTP/1.1\r\nexample.com:8080\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", getHeader(result.Request.Headers, "Host"))
+	}
+	if getHeader(result.Request.Headers, "Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", getHeader(result.Request.Headers, "Content-Type"))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "bare host:port") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected bare host:port warning, got %v", result.Warnings)
+	}
+}
+
+func TestLenient_CR3_NoTrigger_LocalhostNoPort(t *testing.T) {
+	// "localhost" (no dot, no port) does not trigger CR-3 — stays as malformed header.
+	data := []byte("GET / HTTP/1.1\r\nlocalhost\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if getHeader(result.Request.Headers, "Host") != "" {
+		t.Errorf("Host = %q, want empty — bare word without dot does not trigger CR-3", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_CR3_NoTrigger_ContentLength(t *testing.T) {
+	// "Content-Length: 42" must not be affected — key has no dot, value is digits.
+	data := []byte("POST / HTTP/1.1\r\nContent-Length: 42\r\n\r\nhello world, here is some text!!! ok")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	// Content-Length should stay as-is (no CR-3 conversion)
+	if getHeader(result.Request.Headers, "Content-Length") != "42" {
+		t.Errorf("Content-Length = %q, want 42", getHeader(result.Request.Headers, "Content-Length"))
+	}
+	if getHeader(result.Request.Headers, "Host") != "" {
+		t.Errorf("Host unexpectedly set — CR-3 must not fire on Content-Length")
+	}
+}
+
+// ── Path normalization (cases 1-4, 6) ──────────────────────────────────────
+
+func TestLenient_PathBareAuthorityWithPort(t *testing.T) {
+	// Case 1: POST example.com:8080/api/users HTTP/1.1
+	// Path starts with "host:port/" — extract host, use remainder as path.
+	data := []byte("POST example.com:8080/api/users HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", getHeader(result.Request.Headers, "Host"))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "bare host prefix") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected bare host prefix warning, got %v", result.Warnings)
+	}
+}
+
+func TestLenient_PathAbsoluteFormWithPort(t *testing.T) {
+	// Case 2: POST https://example.com:8080/api/users HTTP/1.1
+	// Valid absolute-form — extract host and normalize to origin-form path.
+	data := []byte("POST https://example.com:8080/api/users HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", getHeader(result.Request.Headers, "Host"))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "absolute-form request-target") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected absolute-form warning, got %v", result.Warnings)
+	}
+}
+
+func TestLenient_PathAbsoluteFormWithPort_MissingVersion(t *testing.T) {
+	// Case 3: POST https://example.com:8080/api/users  (no HTTP version)
+	// Missing version AND absolute-form path — lenient handles both.
+	data := []byte("POST https://example.com:8080/api/users\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Version != "HTTP/1.1" {
+		t.Errorf("Version = %q, want HTTP/1.1 (defaulted)", result.Request.Version)
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_PathAbsoluteFormNoPort_MissingVersion(t *testing.T) {
+	// Case 4: POST https://example.com/api/users  (no port, no HTTP version)
+	data := []byte("POST https://example.com/api/users\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Version != "HTTP/1.1" {
+		t.Errorf("Version = %q, want HTTP/1.1 (defaulted)", result.Request.Version)
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_PathBareAuthorityNoPort(t *testing.T) {
+	// Case 6: POST example.com/api/users HTTP/1.1
+	// Bare hostname prefix (with dot, no port) — extract host, fix path.
+	data := []byte("POST example.com/api/users HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_PathNormalization_ExplicitHostWins(t *testing.T) {
+	// If both the path and a header supply a host, the explicit header wins.
+	data := []byte("POST https://from-path.example.com/api HTTP/1.1\r\nHost: explicit.example.com\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api" {
+		t.Errorf("Path = %q, want /api", result.Request.Path)
+	}
+	// Explicit Host header must be preserved; path-derived host must not override it.
+	if getHeader(result.Request.Headers, "Host") != "explicit.example.com" {
+		t.Errorf("Host = %q, want explicit.example.com", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_PathAbsoluteFormNoPath(t *testing.T) {
+	// Absolute URL with no path component — path should default to "/".
+	data := []byte("GET https://example.com HTTP/1.1\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/" {
+		t.Errorf("Path = %q, want /", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
 func TestLenient_ContentLength_Exact(t *testing.T) {
 	// Content-Length matches exactly — no warning, no Partial.
 	data := []byte("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello")

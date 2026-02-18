@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // ParseResult holds the result of lenient parsing.
@@ -67,12 +68,34 @@ func (p *LenientParser) parseRequestLenient() *Request {
 	}
 
 	method, path, version := p.parseRequestLineLenient(line)
+
+	// Normalize path: extract implicit Host from absolute-form URLs and bare
+	// authority prefixes (e.g. "https://example.com/api" → "/api",
+	// "example.com:8080/api" → "/api"). Returns the implied host authority or "".
+	path, impliedHost := p.normalizePathLenient(path)
+
 	req.Method = method
 	req.Path = path
 	req.Version = version
 
 	// Parse headers
 	req.Headers = p.parseHeadersLenient()
+
+	// Inject the host extracted from the request-target if no Host header is
+	// already present. If the user also supplied a bare host:port header line
+	// (CR-3) that was converted to Host, we skip this to avoid duplicates.
+	if impliedHost != "" {
+		hasHost := false
+		for _, h := range req.Headers {
+			if eqFold(h.Key, "Host") {
+				hasHost = true
+				break
+			}
+		}
+		if !hasHost {
+			req.Headers = append([]Header{{Key: "Host", Value: impliedHost}}, req.Headers...)
+		}
+	}
 
 	// Parse body
 	body, partial := p.parseBodyLenient(req.Headers)
@@ -133,6 +156,68 @@ func (p *LenientParser) parseRequestLineLenient(line []byte) (method, path, vers
 		// Normal: method path version (extra parts joined into path? No — version is last)
 		return string(parts[0]), string(parts[1]), string(parts[2])
 	}
+}
+
+// normalizePathLenient inspects the request-target for embedded host
+// information and returns the normalized path plus the extracted host authority.
+//
+// Handled patterns:
+//
+//	Absolute-form:    "https://example.com:8080/api" → path="/api",   host="example.com:8080"
+//	Absolute no path: "https://example.com"          → path="/",      host="example.com"
+//	Bare host+port:   "example.com:8080/api"         → path="/api",   host="example.com:8080"
+//	Bare hostname:    "example.com/api"              → path="/api",   host="example.com"
+//
+// Returns (path, "") when no host is embedded.
+func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impliedHost string) {
+	// Absolute-form: http:// or https://
+	schemeLen := 0
+	switch {
+	case len(path) >= 8 && path[:8] == "https://":
+		schemeLen = 8
+	case len(path) >= 7 && path[:7] == "http://":
+		schemeLen = 7
+	}
+	if schemeLen > 0 {
+		rest := path[schemeLen:] // "authority/path" or just "authority"
+		slashIdx := strings.IndexByte(rest, '/')
+		var authority, urlPath string
+		if slashIdx < 0 {
+			authority = rest
+			urlPath = "/"
+		} else {
+			authority = rest[:slashIdx]
+			urlPath = rest[slashIdx:]
+		}
+		// Strip userinfo (user:pass@host) from the authority if present.
+		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+			authority = authority[at+1:]
+		}
+		if authority != "" {
+			p.addWarning(1, fmt.Sprintf("absolute-form request-target: extracted Host %q, using path %q", authority, urlPath))
+			return urlPath, authority
+		}
+		return urlPath, ""
+	}
+
+	// Bare authority prefix: "host:port/path" or "hostname.tld/path".
+	// The prefix before the first '/' must look like a hostname or host:port.
+	if len(path) > 0 {
+		c0 := path[0]
+		if (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || (c0 >= '0' && c0 <= '9') {
+			slashIdx := strings.IndexByte(path, '/')
+			if slashIdx > 0 {
+				prefix := path[:slashIdx]
+				rest := path[slashIdx:] // includes leading /
+				if isHostnameLike([]byte(prefix)) {
+					p.addWarning(1, fmt.Sprintf("request-target %q contains bare host prefix, extracted Host %q, using path %q", path, prefix, rest))
+					return rest, prefix
+				}
+			}
+		}
+	}
+
+	return path, ""
 }
 
 func (p *LenientParser) parseStatusLineLenient(line []byte) (version string, statusCode int, reason string) {
@@ -230,6 +315,20 @@ func (p *LenientParser) parseHeadersLenient() []Header {
 		}
 
 		value := string(trimOWSBytes(line[colon+1:]))
+
+		// CR-3: a key that looks like a hostname (contains a dot, only hostname
+		// chars) paired with an all-digit value is a bare "host:port" line that
+		// was split on its colon. Header field-names never contain dots in
+		// practice, so this is an unambiguous false parse that must be fixed.
+		// Example: "example.com:8080" → Header{Key:"example.com", Value:"8080"}
+		//                             → Host: example.com:8080
+		if isHostnameKeyStr(key) && isPortStr(value) {
+			hostPort := key + ":" + value
+			p.addWarning(p.line-1, fmt.Sprintf("bare host:port %q treated as implicit Host header", hostPort))
+			headers = append(headers, Header{Key: "Host", Value: hostPort})
+			continue
+		}
+
 		headers = append(headers, Header{Key: key, Value: value})
 	}
 }
@@ -324,6 +423,43 @@ func trimOWSBytes(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// isHostnameKeyStr reports whether s looks like a hostname suitable for use
+// as the key part of a bare host:port header line (CR-3). Requirements:
+// non-empty, at least one dot (dot is the discriminator since legitimate
+// header field-names never contain dots in practice), and all characters
+// are valid hostname chars [a-zA-Z0-9-.].
+func isHostnameKeyStr(s string) bool {
+	if s == "" {
+		return false
+	}
+	hasDot := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-':
+			// valid hostname char
+		case c == '.':
+			hasDot = true
+		default:
+			return false
+		}
+	}
+	return hasDot
+}
+
+// isPortStr reports whether s is a non-empty string of ASCII digits (a port number).
+func isPortStr(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // isHostnameLike reports whether b looks like a bare hostname or host:port,

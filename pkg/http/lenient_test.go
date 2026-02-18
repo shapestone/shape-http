@@ -268,3 +268,134 @@ func TestUnmarshalLenient_ContentLength_BodyLonger(t *testing.T) {
 		t.Error("Partial = true, want false — body exceeds declared length, nothing is missing")
 	}
 }
+
+// ── CR-3: bare host:port in header section ─────────────────────────────────
+
+func TestUnmarshalLenient_CR3_BareHostPort(t *testing.T) {
+	// "example.com:8080" in header position → Host: example.com:8080
+	data := []byte("POST /api/users HTTP/1.1\r\nexample.com:8080\r\nContent-Type: application/json\r\n\r\n{}")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Headers.Get("Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", result.Request.Headers.Get("Host"))
+	}
+}
+
+// ── Path normalization: all 6 request forms ────────────────────────────────
+
+func TestUnmarshalLenient_Case1_BareAuthorityWithPort(t *testing.T) {
+	// POST example.com:8080/api/users HTTP/1.1
+	body := "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}"
+	data := []byte("POST example.com:8080/api/users HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 48\r\n\r\n" + body)
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if result.Request.Headers.Get("Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", result.Request.Headers.Get("Host"))
+	}
+	if result.Request.Method != "POST" {
+		t.Errorf("Method = %q, want POST", result.Request.Method)
+	}
+}
+
+func TestUnmarshalLenient_Case2_AbsoluteFormWithPort(t *testing.T) {
+	// POST https://example.com:8080/api/users HTTP/1.1
+	body := "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}"
+	data := []byte("POST https://example.com:8080/api/users HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 48\r\n\r\n" + body)
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if result.Request.Headers.Get("Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", result.Request.Headers.Get("Host"))
+	}
+	if result.Request.Version != "HTTP/1.1" {
+		t.Errorf("Version = %q, want HTTP/1.1", result.Request.Version)
+	}
+}
+
+func TestUnmarshalLenient_Case3_AbsoluteFormWithPort_NoVersion(t *testing.T) {
+	// POST https://example.com:8080/api/users   (no HTTP version)
+	body := "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}"
+	data := []byte("POST https://example.com:8080/api/users\r\nContent-Type: application/json\r\nContent-Length: 48\r\n\r\n" + body)
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if result.Request.Headers.Get("Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", result.Request.Headers.Get("Host"))
+	}
+	if result.Request.Version != "HTTP/1.1" {
+		t.Errorf("Version = %q, want HTTP/1.1 (defaulted)", result.Request.Version)
+	}
+}
+
+func TestUnmarshalLenient_Case4_AbsoluteFormNoPort_NoVersion(t *testing.T) {
+	// POST https://example.com/api/users   (no port, no HTTP version)
+	body := "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}"
+	data := []byte("POST https://example.com/api/users\r\nContent-Type: application/json\r\nContent-Length: 48\r\n\r\n" + body)
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if result.Request.Headers.Get("Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", result.Request.Headers.Get("Host"))
+	}
+	if result.Request.Version != "HTTP/1.1" {
+		t.Errorf("Version = %q, want HTTP/1.1 (defaulted)", result.Request.Version)
+	}
+}
+
+func TestUnmarshalLenient_Case5_BareHostnameLine(t *testing.T) {
+	// POST /api/users HTTP/1.1  + "example.com" on its own line (CR-1, already implemented)
+	body := "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}"
+	data := []byte("POST /api/users HTTP/1.1\r\nexample.com\r\nContent-Type: application/json\r\nContent-Length: 48\r\n\r\n" + body)
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if result.Request.Headers.Get("Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", result.Request.Headers.Get("Host"))
+	}
+}
+
+func TestUnmarshalLenient_Case6_BareAuthorityNoPort(t *testing.T) {
+	// POST example.com/api/users HTTP/1.1  (bare hostname prefix, no port)
+	body := "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}"
+	data := []byte("POST example.com/api/users HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 48\r\n\r\n" + body)
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if result.Request.Headers.Get("Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", result.Request.Headers.Get("Host"))
+	}
+}
