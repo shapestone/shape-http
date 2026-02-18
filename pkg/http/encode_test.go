@@ -52,3 +52,13 @@ func TestEncoder_Response(t *testing.T) {
 		t.Errorf("Encode() =\n%q\nwant:\n%q", buf.String(), want)
 	}
 }
+
+func TestEncoder_UnsupportedType(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	err := enc.Encode("not a request or response")
+	if err == nil {
+		t.Error("Encode() = nil, want error for unsupported type")
+	}
+}

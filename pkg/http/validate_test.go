@@ -1,6 +1,7 @@
 package http
 
 import (
+	"io"
 	"strings"
 	"testing"
 )
@@ -52,5 +53,30 @@ func TestValidateReader(t *testing.T) {
 	err := ValidateReader(r)
 	if err != nil {
 		t.Errorf("ValidateReader() = %v, want nil", err)
+	}
+}
+
+func TestValidateReader_Invalid(t *testing.T) {
+	r := strings.NewReader("NOTHTTP\r\n\r\n")
+	err := ValidateReader(r)
+	if err == nil {
+		t.Error("ValidateReader() = nil, want error for invalid HTTP")
+	}
+}
+
+func TestValidateReader_Response(t *testing.T) {
+	r := strings.NewReader("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+	err := ValidateReader(r)
+	if err != nil {
+		t.Errorf("ValidateReader() = %v, want nil", err)
+	}
+}
+
+func TestValidateReader_IOError(t *testing.T) {
+	// errReader is defined in parser_test.go (same package)
+	r := &errReader{err: io.ErrUnexpectedEOF}
+	err := ValidateReader(r)
+	if err == nil {
+		t.Error("ValidateReader() = nil, want error for reader failure")
 	}
 }

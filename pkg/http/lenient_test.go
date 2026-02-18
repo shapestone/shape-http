@@ -118,3 +118,93 @@ func TestUnmarshalLenient_WhitespaceBeforeColon(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", result.Request.Headers.Get("Content-Type"))
 	}
 }
+
+func TestParseLenient_Request(t *testing.T) {
+	node, warnings, err := ParseLenient("GET /api HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err != nil {
+		t.Fatalf("ParseLenient() error = %v", err)
+	}
+	if node == nil {
+		t.Fatal("expected node, got nil")
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for valid request, got %v", warnings)
+	}
+
+	// Node must be renderable back to wire format
+	wire, err := Render(node)
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if len(wire) == 0 {
+		t.Error("expected non-empty wire bytes")
+	}
+}
+
+func TestParseLenient_Response(t *testing.T) {
+	node, warnings, err := ParseLenient("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHello")
+	if err != nil {
+		t.Fatalf("ParseLenient() error = %v", err)
+	}
+	if node == nil {
+		t.Fatal("expected node, got nil")
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for valid response, got %v", warnings)
+	}
+}
+
+func TestParseLenient_MalformedRequest(t *testing.T) {
+	// Missing version — lenient should still return a node with a warning
+	node, warnings, err := ParseLenient("GET /path\r\nHost: example.com\r\n\r\n")
+	if err != nil {
+		t.Fatalf("ParseLenient() error = %v", err)
+	}
+	if node == nil {
+		t.Fatal("expected node, got nil")
+	}
+	if len(warnings) == 0 {
+		t.Error("expected warnings for missing version")
+	}
+}
+
+func TestParseLenient_EmptyInput(t *testing.T) {
+	// Empty input: should return an "unknown" object node with no error
+	node, _, err := ParseLenient("")
+	if err != nil {
+		t.Fatalf("ParseLenient() error = %v", err)
+	}
+	if node == nil {
+		t.Fatal("expected node, got nil")
+	}
+	// Node should be the "unknown" placeholder
+	wire, renderErr := Render(node)
+	// Render may fail for "unknown" type — that's OK, the node itself exists
+	_ = wire
+	_ = renderErr
+}
+
+func TestParseLenient_Garbage(t *testing.T) {
+	// Completely garbage input — treated as request attempt, returns node with warnings
+	node, warnings, err := ParseLenient("not http at all !!!")
+	if err != nil {
+		t.Fatalf("ParseLenient() error = %v", err)
+	}
+	if node == nil {
+		t.Fatal("expected node, got nil")
+	}
+	_ = warnings // may or may not have warnings depending on what was extracted
+}
+
+func TestUnmarshalLenient_TruncatedResponseBody(t *testing.T) {
+	// Response with truncated body — Partial should be true via "message body is incomplete" warning
+	data := []byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort response body")
+	result := UnmarshalLenient(data)
+
+	if result.Response == nil {
+		t.Fatal("expected response")
+	}
+	if !result.Partial {
+		t.Error("expected Partial=true for truncated response body")
+	}
+}

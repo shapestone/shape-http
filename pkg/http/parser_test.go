@@ -1,6 +1,7 @@
 package http
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -75,4 +76,29 @@ func TestParse_Invalid(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for malformed request line")
 	}
+}
+
+func TestParseReader_Invalid(t *testing.T) {
+	r := strings.NewReader("NOTHTTP\r\n\r\n")
+	_, err := ParseReader(r)
+	if err == nil {
+		t.Error("ParseReader() = nil, want error for invalid HTTP")
+	}
+}
+
+func TestParseReader_IOError(t *testing.T) {
+	r := &errReader{err: io.ErrUnexpectedEOF}
+	_, err := ParseReader(r)
+	if err == nil {
+		t.Error("ParseReader() = nil, want error for reader failure")
+	}
+}
+
+// errReader is an io.Reader that always returns the given error.
+type errReader struct {
+	err error
+}
+
+func (e *errReader) Read(_ []byte) (int, error) {
+	return 0, e.err
 }

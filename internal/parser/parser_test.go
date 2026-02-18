@@ -127,3 +127,126 @@ func TestNodeToResponse_RoundTrip(t *testing.T) {
 		t.Errorf("Body = %q, want 'Not Found'", string(resp.Body))
 	}
 }
+
+func TestParse_InvalidRequest(t *testing.T) {
+	// Malformed request → parseRequest error path
+	data := []byte("NOTHTTP\r\n\r\n")
+	p := NewParser(data)
+	_, err := p.Parse()
+	if err == nil {
+		t.Error("Parse() = nil, want error for invalid request")
+	}
+}
+
+func TestParse_InvalidResponse(t *testing.T) {
+	// Malformed response (starts with HTTP/ but invalid status)
+	data := []byte("HTTP/1.1 abc Bad\r\n\r\n")
+	p := NewParser(data)
+	_, err := p.Parse()
+	if err == nil {
+		t.Error("Parse() = nil, want error for invalid response")
+	}
+}
+
+func TestNodeToRequest_NonObjectNode(t *testing.T) {
+	node := ast.NewLiteralNode("not an object", zeroPos)
+	_, err := NodeToRequest(node)
+	if err == nil {
+		t.Error("NodeToRequest() = nil, want error for non-ObjectNode")
+	}
+}
+
+func TestNodeToResponse_NonObjectNode(t *testing.T) {
+	node := ast.NewLiteralNode("not an object", zeroPos)
+	_, err := NodeToResponse(node)
+	if err == nil {
+		t.Error("NodeToResponse() = nil, want error for non-ObjectNode")
+	}
+}
+
+func TestNodeToRequest_HeadersNotArray(t *testing.T) {
+	// "headers" property is not an ArrayDataNode — should error
+	node := ast.NewObjectNode(map[string]ast.SchemaNode{
+		"type":    ast.NewLiteralNode("request", zeroPos),
+		"method":  ast.NewLiteralNode("GET", zeroPos),
+		"path":    ast.NewLiteralNode("/", zeroPos),
+		"version": ast.NewLiteralNode("HTTP/1.1", zeroPos),
+		"headers": ast.NewLiteralNode("not an array", zeroPos), // wrong type
+	}, zeroPos)
+	_, err := NodeToRequest(node)
+	if err == nil {
+		t.Error("NodeToRequest() = nil, want error when headers is not ArrayDataNode")
+	}
+}
+
+func TestNodeToResponse_StatusCodeAsString(t *testing.T) {
+	// statusCode as a string value — exercises the string case in type switch
+	node := ast.NewObjectNode(map[string]ast.SchemaNode{
+		"type":       ast.NewLiteralNode("response", zeroPos),
+		"version":    ast.NewLiteralNode("HTTP/1.1", zeroPos),
+		"statusCode": ast.NewLiteralNode("200", zeroPos), // string, not int64
+		"reason":     ast.NewLiteralNode("OK", zeroPos),
+		"headers":    ast.NewArrayDataNode(nil, zeroPos),
+	}, zeroPos)
+	resp, err := NodeToResponse(node)
+	if err != nil {
+		t.Fatalf("NodeToResponse() error = %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestNodeToHeaders_NonObjectElement(t *testing.T) {
+	// Array element is not an ObjectNode — should be skipped (continue branch)
+	node := ast.NewObjectNode(map[string]ast.SchemaNode{
+		"type":    ast.NewLiteralNode("request", zeroPos),
+		"method":  ast.NewLiteralNode("GET", zeroPos),
+		"path":    ast.NewLiteralNode("/", zeroPos),
+		"version": ast.NewLiteralNode("HTTP/1.1", zeroPos),
+		"headers": ast.NewArrayDataNode([]ast.SchemaNode{
+			ast.NewLiteralNode("not an object", zeroPos), // should be skipped
+		}, zeroPos),
+	}, zeroPos)
+	req, err := NodeToRequest(node)
+	if err != nil {
+		t.Fatalf("NodeToRequest() error = %v", err)
+	}
+	// Non-object element should be skipped, resulting in 0 headers
+	if len(req.Headers) != 0 {
+		t.Errorf("Headers count = %d, want 0 (non-object element skipped)", len(req.Headers))
+	}
+}
+
+func TestNodeToResponse_Float64StatusCode(t *testing.T) {
+	// statusCode as float64 value — exercises the float64 case in the type switch
+	node := ast.NewObjectNode(map[string]ast.SchemaNode{
+		"type":       ast.NewLiteralNode("response", zeroPos),
+		"version":    ast.NewLiteralNode("HTTP/1.1", zeroPos),
+		"statusCode": ast.NewLiteralNode(float64(200), zeroPos),
+		"reason":     ast.NewLiteralNode("OK", zeroPos),
+		"headers":    ast.NewArrayDataNode(nil, zeroPos),
+	}, zeroPos)
+	resp, err := NodeToResponse(node)
+	if err != nil {
+		t.Fatalf("NodeToResponse() error = %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestNodeToResponse_HeadersNotArray(t *testing.T) {
+	// "headers" property is not an ArrayDataNode — should error
+	node := ast.NewObjectNode(map[string]ast.SchemaNode{
+		"type":       ast.NewLiteralNode("response", zeroPos),
+		"version":    ast.NewLiteralNode("HTTP/1.1", zeroPos),
+		"statusCode": ast.NewLiteralNode(int64(200), zeroPos),
+		"reason":     ast.NewLiteralNode("OK", zeroPos),
+		"headers":    ast.NewLiteralNode("not an array", zeroPos), // wrong type
+	}, zeroPos)
+	_, err := NodeToResponse(node)
+	if err == nil {
+		t.Error("NodeToResponse() = nil, want error when headers is not ArrayDataNode")
+	}
+}

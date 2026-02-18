@@ -300,3 +300,27 @@ func TestUnmarshal_BodyTruncated(t *testing.T) {
 		t.Error("expected error for truncated body")
 	}
 }
+
+// customUnmarshaler implements the Unmarshaler interface for testing the
+// interface dispatch path in Unmarshal.
+type customUnmarshaler struct {
+	called bool
+}
+
+func (u *customUnmarshaler) UnmarshalHTTP(data []byte) error {
+	u.called = true
+	return nil
+}
+
+func TestUnmarshal_UnmarshalerInterface(t *testing.T) {
+	// A type implementing Unmarshaler should have its UnmarshalHTTP method called.
+	cu := &customUnmarshaler{}
+	data := []byte("GET / HTTP/1.1\r\n\r\n")
+	err := Unmarshal(data, cu)
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !cu.called {
+		t.Error("UnmarshalHTTP was not called on Unmarshaler")
+	}
+}

@@ -85,6 +85,42 @@ func TestResponseToNode_AndBack(t *testing.T) {
 	}
 }
 
+func TestNodeToRequest_NonObjectNode(t *testing.T) {
+	// Passing a non-ObjectNode should return an error
+	node := ast.NewLiteralNode("not an object", zeroPos)
+	_, err := NodeToRequest(node)
+	if err == nil {
+		t.Error("NodeToRequest() = nil, want error for non-ObjectNode")
+	}
+}
+
+func TestNodeToResponse_NonObjectNode(t *testing.T) {
+	// Passing a non-ObjectNode should return an error
+	node := ast.NewLiteralNode("not an object", zeroPos)
+	_, err := NodeToResponse(node)
+	if err == nil {
+		t.Error("NodeToResponse() = nil, want error for non-ObjectNode")
+	}
+}
+
+func TestNodeToRequest_NoBody(t *testing.T) {
+	// Request without body property should have nil body
+	req := &Request{
+		Method:  "GET",
+		Path:    "/",
+		Version: "HTTP/1.1",
+		Headers: Headers{{Key: "Host", Value: "example.com"}},
+	}
+	node := RequestToNode(req)
+	req2, err := NodeToRequest(node)
+	if err != nil {
+		t.Fatalf("NodeToRequest() error = %v", err)
+	}
+	if req2.Body != nil {
+		t.Errorf("Body = %v, want nil", req2.Body)
+	}
+}
+
 func TestNodeToInterface(t *testing.T) {
 	req := &Request{
 		Method:  "GET",
@@ -105,5 +141,37 @@ func TestNodeToInterface(t *testing.T) {
 	}
 	if m["method"] != "GET" {
 		t.Errorf("method = %v, want GET", m["method"])
+	}
+}
+
+func TestNodeToInterface_Array(t *testing.T) {
+	// Test with an ArrayDataNode to cover the array branch
+	req := &Request{
+		Method:  "GET",
+		Path:    "/",
+		Version: "HTTP/1.1",
+		Headers: Headers{{Key: "Host", Value: "example.com"}},
+	}
+	node := RequestToNode(req)
+
+	// The "headers" property is an ArrayDataNode
+	obj := node.(*ast.ObjectNode)
+	headersNode := obj.Properties()["headers"]
+
+	iface := NodeToInterface(headersNode)
+	arr, ok := iface.([]interface{})
+	if !ok {
+		t.Fatalf("expected []interface{}, got %T", iface)
+	}
+	if len(arr) != 1 {
+		t.Errorf("expected 1 header, got %d", len(arr))
+	}
+}
+
+func TestNodeToInterface_UnknownType(t *testing.T) {
+	// Passing a nil or unknown node type returns nil
+	result := NodeToInterface(nil)
+	if result != nil {
+		t.Errorf("NodeToInterface(nil) = %v, want nil", result)
 	}
 }
