@@ -292,20 +292,29 @@ func (p *LenientParser) parseHeadersLenient() []Header {
 			return headers
 		}
 
-		// Check for empty line (end of headers)
+		// Detect empty line (CRLF, bare LF, or bare CR).
+		emptyLen := 0
 		if p.data[p.pos] == '\r' && p.pos+1 < p.length && p.data[p.pos+1] == '\n' {
-			p.pos += 2
-			p.line++
-			return headers
+			emptyLen = 2
+		} else if p.data[p.pos] == '\n' {
+			emptyLen = 1
+		} else if p.data[p.pos] == '\r' {
+			emptyLen = 1
 		}
-		if p.data[p.pos] == '\n' {
-			p.pos++
-			p.line++
-			return headers
-		}
-		if p.data[p.pos] == '\r' {
-			// Bare CR — treat as end of headers
-			p.pos++
+
+		if emptyLen > 0 {
+			// Lenient: a blank line before any headers have been seen is likely
+			// a stray extra line between the request-line and the headers (common
+			// in hand-written or editor-generated requests). If what follows the
+			// blank line looks like a header field, skip it and keep parsing.
+			if len(headers) == 0 && looksLikeHeaderField(p.data[p.pos+emptyLen:]) {
+				p.pos += emptyLen
+				p.line++
+				p.addWarning(p.line-1, "skipped stray blank line before headers")
+				continue
+			}
+			// Normal path: blank line ends the headers section.
+			p.pos += emptyLen
 			p.line++
 			return headers
 		}
@@ -470,6 +479,31 @@ func trimOWSBytes(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// looksLikeHeaderField returns true if the data at b starts with something
+// that looks like an HTTP header field ("Token: value"). It is used to detect
+// stray blank lines before the headers section in lenient mode.
+// A header field starts with a letter, followed by token chars, then a colon.
+func looksLikeHeaderField(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	c := b[0]
+	if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+		return false
+	}
+	for i := 1; i < len(b); i++ {
+		ch := b[i]
+		if ch == ':' {
+			return true // found colon after at least one token char
+		}
+		// Token chars: letters, digits, hyphens, underscores
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
+			return false
+		}
+	}
+	return false
 }
 
 // parseIPv6HostLine parses a raw header line that starts with '[' and returns

@@ -676,6 +676,57 @@ func TestLenient_ContentLength_BodyShorter(t *testing.T) {
 	}
 }
 
+// ── Stray blank line before headers ────────────────────────────────────────
+
+func TestLenient_StrayBlankLineBeforeHeaders(t *testing.T) {
+	// Extra blank line between request-line and headers — common in
+	// hand-written / editor-generated requests.
+	data := []byte("POST https://example.com:8080/api/users HTTP/1.1\r\n\r\nContent-Type: application/json\r\nContent-Length: 5\r\n\r\nhello")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", getHeader(result.Request.Headers, "Content-Type"))
+	}
+	if string(result.Request.Body) != "hello" {
+		t.Errorf("Body = %q, want hello", string(result.Request.Body))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "stray blank line") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected stray blank line warning, got %v", result.Warnings)
+	}
+}
+
+func TestLenient_StrayBlankLine_BodyNotMisidentified(t *testing.T) {
+	// Blank line before a JSON body (no headers) — body must NOT be parsed
+	// as headers. The blank line is the real end of the (empty) headers section.
+	data := []byte("POST / HTTP/1.1\r\n\r\n{\"key\":\"value\"}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	// No headers — the blank line was a legitimate end-of-headers
+	if len(result.Request.Headers) != 0 {
+		t.Errorf("Headers = %v, want empty — JSON body must not be parsed as headers", result.Request.Headers)
+	}
+	if string(result.Request.Body) != `{"key":"value"}` {
+		t.Errorf("Body = %q, want {\"key\":\"value\"}", string(result.Request.Body))
+	}
+}
+
 // ── IPv6 literal address handling ──────────────────────────────────────────
 
 func TestLenient_IPv6_BareHeaderLine(t *testing.T) {
