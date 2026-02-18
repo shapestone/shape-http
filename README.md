@@ -24,19 +24,42 @@ Parses and serializes HTTP/1.1 messages (RFC 7230/7231) with a dual-path archite
 go get github.com/shapestone/shape-http
 ```
 
-## Usage
-
-### Marshal: Go structs → HTTP wire format
+## Import
 
 ```go
-import (
-    "net/http"
-    shaphttp "github.com/shapestone/shape-http/pkg/http"
-)
+import shaphttp "github.com/shapestone/shape-http/pkg/http"
+```
 
-// Marshal an *http.Request to wire format
-req, _ := http.NewRequest("GET", "http://example.com/api/users", nil)
-req.Header.Set("Accept", "application/json")
+> **Why the alias?** The package is named `http`, which collides with Go's standard
+> library `net/http`. When both are needed in the same file, use an alias to
+> distinguish them:
+>
+> ```go
+> import (
+>     "net/http"                                           // stdlib — ResponseWriter, ServeMux, etc.
+>     shaphttp "github.com/shapestone/shape-http/pkg/http" // shape-http — wire format parsing
+> )
+> ```
+>
+> When only shape-http is needed (e.g. a standalone parser or proxy), no alias is
+> required and you can import it directly as `http`.
+
+## Usage
+
+### Marshal: shape-http types → HTTP wire format
+
+```go
+import shaphttp "github.com/shapestone/shape-http/pkg/http"
+
+req := &shaphttp.Request{
+    Method:  "GET",
+    Path:    "/api/users",
+    Version: "HTTP/1.1",
+    Headers: shaphttp.Headers{
+        {Key: "Host", Value: "example.com"},
+        {Key: "Accept", Value: "application/json"},
+    },
+}
 
 data, err := shaphttp.Marshal(req)
 // GET /api/users HTTP/1.1\r\n
@@ -44,17 +67,22 @@ data, err := shaphttp.Marshal(req)
 // Accept: application/json\r\n
 // \r\n
 
-// Marshal an *http.Response
-resp := &http.Response{
+resp := &shaphttp.Response{
+    Version:    "HTTP/1.1",
     StatusCode: 200,
-    Proto:      "HTTP/1.1",
-    Header:     http.Header{"Content-Type": []string{"application/json"}},
-    Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+    Reason:     "OK",
+    Headers:    shaphttp.Headers{{Key: "Content-Type", Value: "application/json"}},
+    Body:       []byte(`{"ok":true}`),
 }
 data, err = shaphttp.Marshal(resp)
+// HTTP/1.1 200 OK\r\n
+// Content-Type: application/json\r\n
+// Content-Length: 11\r\n
+// \r\n
+// {"ok":true}
 ```
 
-### Unmarshal: HTTP wire format → Go structs
+### Unmarshal: HTTP wire format → shape-http types
 
 ```go
 import shaphttp "github.com/shapestone/shape-http/pkg/http"
@@ -62,34 +90,38 @@ import shaphttp "github.com/shapestone/shape-http/pkg/http"
 // Parse an HTTP request
 raw := []byte("GET /path HTTP/1.1\r\nHost: example.com\r\n\r\n")
 req, err := shaphttp.UnmarshalRequest(raw)
-// req is *http.Request with Method, URL, Header, etc.
+// req is *shaphttp.Request{Method: "GET", Path: "/path", Version: "HTTP/1.1", ...}
 
 // Parse an HTTP response
 rawResp := []byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello")
 resp, err := shaphttp.UnmarshalResponse(rawResp)
-// resp is *http.Response with StatusCode, Header, Body, etc.
+// resp is *shaphttp.Response{StatusCode: 200, Reason: "OK", Body: []byte("Hello"), ...}
 ```
 
 ### Chunked Transfer Encoding
 
 ```go
-// Chunked responses are parsed automatically
+// Chunked responses are decoded automatically
 chunkedResp := []byte(
     "HTTP/1.1 200 OK\r\n" +
     "Transfer-Encoding: chunked\r\n\r\n" +
     "5\r\nHello\r\n6\r\nWorld!\r\n0\r\n\r\n",
 )
 resp, err := shaphttp.UnmarshalResponse(chunkedResp)
-body, _ := io.ReadAll(resp.Body)
-// body: "HelloWorld!"
+// resp.Body == []byte("HelloWorld!")
 ```
 
 ### Lenient Mode
 
 ```go
-// Parse malformed or non-RFC-compliant HTTP (useful for debugging or proxies)
-raw := []byte("GET /path HTTP/1.1\nHost: example.com\n\n") // LF-only line endings
-req, err := shaphttp.UnmarshalRequestLenient(raw)
+// Best-effort parsing of malformed or non-RFC-compliant HTTP.
+// Never returns an error — extracts what it can and reports issues as warnings.
+raw := []byte("GET /path\nHost: example.com\n\n") // bare LF, missing version
+result := shaphttp.UnmarshalLenient(raw)
+// result.Request.Method  == "GET"
+// result.Request.Version == "HTTP/1.1"  (defaulted)
+// result.Warnings        == ["line 1: missing HTTP version in request-line, defaulting to HTTP/1.1"]
+// result.Partial         == false
 ```
 
 ### Streaming API
@@ -97,19 +129,20 @@ req, err := shaphttp.UnmarshalRequestLenient(raw)
 ```go
 // Encode to an io.Writer
 encoder := shaphttp.NewEncoder(os.Stdout)
-encoder.EncodeRequest(req)
+encoder.Encode(req)
 
 // Decode from an io.Reader
 decoder := shaphttp.NewDecoder(conn)
 req, err := decoder.DecodeRequest()
+resp, err := decoder.DecodeResponse()
 ```
 
 ### Validation
 
 ```go
-// Validate an HTTP message against RFC 7230/7231
-if err := shaphttp.ValidateRequest(req); err != nil {
-    log.Printf("Invalid request: %v", err)
+// Validate raw bytes against RFC 9112
+if err := shaphttp.Validate(string(raw)); err != nil {
+    log.Printf("Invalid HTTP message: %v", err)
 }
 ```
 
