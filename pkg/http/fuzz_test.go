@@ -205,12 +205,6 @@ func FuzzMarshalResponse(f *testing.F) {
 
 // FuzzRoundTripRequest verifies that a successfully parsed request can be
 // marshaled and re-parsed to produce the same result.
-//
-// Note: chunked messages are excluded because the parser decodes the body on
-// parse (dechunking), but Marshal does not re-encode it as chunked. The
-// Transfer-Encoding header is preserved, so a re-parse would see a chunked
-// header with a raw (already-decoded) body and fail. This is a known
-// design characteristic, not a bug.
 func FuzzRoundTripRequest(f *testing.F) {
 	for _, seed := range requestSeeds {
 		f.Add(seed)
@@ -226,10 +220,6 @@ func FuzzRoundTripRequest(f *testing.F) {
 		req1, err := UnmarshalRequest(data)
 		if err != nil {
 			return // invalid input, skip
-		}
-		// Skip chunked: parse decodes body but Marshal does not re-encode as chunked.
-		if req1.Headers.IsChunked() {
-			return
 		}
 
 		wire, err := Marshal(req1)
@@ -258,8 +248,6 @@ func FuzzRoundTripRequest(f *testing.F) {
 
 // FuzzRoundTripResponse verifies that a successfully parsed response can be
 // marshaled and re-parsed to produce the same result.
-//
-// Note: chunked messages are excluded for the same reason as FuzzRoundTripRequest.
 func FuzzRoundTripResponse(f *testing.F) {
 	for _, seed := range responseSeeds {
 		f.Add(seed)
@@ -275,10 +263,6 @@ func FuzzRoundTripResponse(f *testing.F) {
 		resp1, err := UnmarshalResponse(data)
 		if err != nil {
 			return // invalid input, skip
-		}
-		// Skip chunked: parse decodes body but Marshal does not re-encode as chunked.
-		if resp1.Headers.IsChunked() {
-			return
 		}
 
 		wire, err := Marshal(resp1)

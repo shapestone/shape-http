@@ -70,9 +70,13 @@ func (p *Parser) ParseRequest() (*Request, error) {
 		return nil, err
 	}
 
+	wasChunked := isChunked(headers)
 	body, err := p.parseBody(headers)
 	if err != nil {
 		return nil, err
+	}
+	if wasChunked {
+		headers = normalizeChunkedHeaders(headers, len(body))
 	}
 
 	return &Request{
@@ -96,9 +100,13 @@ func (p *Parser) ParseResponse() (*Response, error) {
 		return nil, err
 	}
 
+	wasChunked := isChunked(headers)
 	body, err := p.parseBody(headers)
 	if err != nil {
 		return nil, err
+	}
+	if wasChunked {
+		headers = normalizeChunkedHeaders(headers, len(body))
 	}
 
 	return &Response{
@@ -321,6 +329,87 @@ func isChunked(headers []Header) bool {
 		}
 	}
 	return false
+}
+
+// normalizeChunkedHeaders removes Transfer-Encoding after chunked decoding and
+// sets Content-Length to the decoded body length.
+//
+// Chunked encoding is a transport-level framing mechanism. Once the body is
+// fully decoded, the struct should reflect the logical message: a known-length
+// body with Content-Length, not a chunked stream. This makes the struct
+// self-consistent for re-marshaling (e.g., in HTTP client/server use).
+func normalizeChunkedHeaders(headers []Header, bodyLen int) []Header {
+	out := headers[:0:len(headers)]
+	out = out[:0]
+	hasContentLength := false
+	for _, h := range headers {
+		if eqFold(h.Key, "Transfer-Encoding") {
+			// Strip "chunked" from the value; drop the header if nothing remains.
+			stripped := stripChunked(h.Value)
+			if stripped != "" {
+				out = append(out, Header{Key: h.Key, Value: stripped})
+			}
+			continue
+		}
+		if eqFold(h.Key, "Content-Length") {
+			// Replace with the decoded body length.
+			out = append(out, Header{Key: h.Key, Value: strconv.Itoa(bodyLen)})
+			hasContentLength = true
+			continue
+		}
+		out = append(out, h)
+	}
+	if !hasContentLength {
+		out = append(out, Header{Key: "Content-Length", Value: strconv.Itoa(bodyLen)})
+	}
+	return out
+}
+
+// stripChunked removes "chunked" from a Transfer-Encoding value and returns
+// the remainder (trimmed). Returns "" if chunked was the only encoding.
+func stripChunked(value string) string {
+	// Fast path: value is exactly "chunked"
+	if eqFold(value, "chunked") {
+		return ""
+	}
+	// Multiple encodings: remove the "chunked" token.
+	// Encodings are comma-separated; chunked must be the last per RFC 9112 §6.1.
+	result := ""
+	for _, part := range splitComma(value) {
+		part = trimString(part)
+		if !eqFold(part, "chunked") {
+			if result != "" {
+				result += ", "
+			}
+			result += part
+		}
+	}
+	return result
+}
+
+// splitComma splits a comma-separated string into parts.
+func splitComma(s string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
+// trimString trims leading and trailing ASCII whitespace.
+func trimString(s string) string {
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') {
+		s = s[1:]
+	}
+	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t') {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 // getContentLength returns the Content-Length value, or -1 if absent/invalid.
