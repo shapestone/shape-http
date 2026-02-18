@@ -60,6 +60,7 @@ func TestUnmarshalLenient_MissingVersion(t *testing.T) {
 }
 
 func TestUnmarshalLenient_TruncatedBody(t *testing.T) {
+	// CR-2: body shorter than Content-Length → read all available, warn, Partial=true.
 	data := []byte("POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\npartial data")
 	result := UnmarshalLenient(data)
 
@@ -70,7 +71,16 @@ func TestUnmarshalLenient_TruncatedBody(t *testing.T) {
 		t.Errorf("Body = %q, want 'partial data'", string(result.Request.Body))
 	}
 	if !result.Partial {
-		t.Error("expected Partial=true for truncated body")
+		t.Error("expected Partial=true when body is shorter than Content-Length")
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "Content-Length declared") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Content-Length mismatch warning, got %v", result.Warnings)
 	}
 }
 
@@ -197,7 +207,7 @@ func TestParseLenient_Garbage(t *testing.T) {
 }
 
 func TestUnmarshalLenient_TruncatedResponseBody(t *testing.T) {
-	// Response with truncated body — Partial should be true via "message body is incomplete" warning
+	// CR-2: response body shorter than Content-Length → read all available, warn, Partial=true.
 	data := []byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort response body")
 	result := UnmarshalLenient(data)
 
@@ -205,6 +215,56 @@ func TestUnmarshalLenient_TruncatedResponseBody(t *testing.T) {
 		t.Fatal("expected response")
 	}
 	if !result.Partial {
-		t.Error("expected Partial=true for truncated response body")
+		t.Error("expected Partial=true when response body is shorter than Content-Length")
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "Content-Length declared") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Content-Length mismatch warning, got %v", result.Warnings)
+	}
+}
+
+func TestUnmarshalLenient_BareHostname(t *testing.T) {
+	// CR-1: bare hostname on its own line → treated as Host header.
+	data := []byte("POST /api/users HTTP/1.1\r\nexample.com\r\nContent-Type: application/json\r\n\r\n{}")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Headers.Get("Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", result.Request.Headers.Get("Host"))
+	}
+	if result.Request.Headers.Get("Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", result.Request.Headers.Get("Content-Type"))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "implicit Host header") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected implicit Host header warning, got %v", result.Warnings)
+	}
+}
+
+func TestUnmarshalLenient_ContentLength_BodyLonger(t *testing.T) {
+	// CR-2: body longer than Content-Length → read full body, warn, Partial=false.
+	data := []byte("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello world")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if string(result.Request.Body) != "hello world" {
+		t.Errorf("Body = %q, want hello world", string(result.Request.Body))
+	}
+	if result.Partial {
+		t.Error("Partial = true, want false — body exceeds declared length, nothing is missing")
 	}
 }

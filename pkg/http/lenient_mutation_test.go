@@ -206,7 +206,7 @@ func TestLenientMutations_Request(t *testing.T) {
 		{
 			name:        "truncate body",
 			apply:       mutTruncateBody,
-			wantWarning: "truncated",
+			wantWarning: "Content-Length declared",
 			wantPartial: true,
 			check: func(t *testing.T, r *ParseResult) {
 				if r.Request == nil {
@@ -393,7 +393,7 @@ func TestLenientMutations_Response(t *testing.T) {
 		{
 			name:        "truncate body",
 			apply:       mutTruncateBody,
-			wantWarning: "truncated",
+			wantWarning: "Content-Length declared",
 			wantPartial: true,
 			check: func(t *testing.T, r *ParseResult) {
 				if r.Response == nil {

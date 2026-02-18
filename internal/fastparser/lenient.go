@@ -212,8 +212,15 @@ func (p *LenientParser) parseHeadersLenient() []Header {
 		// Parse "Key: Value" — lenient: accept whitespace before colon
 		colon := bytes.IndexByte(line, ':')
 		if colon < 0 {
-			// No colon — skip this line with warning
-			p.addWarning(p.line-1, fmt.Sprintf("malformed header (no colon), skipped: %s", string(line)))
+			// No colon — check if the line looks like a bare hostname/host:port.
+			// A common editor pattern is to write the host on its own line without
+			// the "Host:" prefix (e.g. "example.com" or "api.example.com:8080").
+			if isHostnameLike(line) {
+				p.addWarning(p.line-1, fmt.Sprintf("bare hostname %q treated as implicit Host header", string(line)))
+				headers = append(headers, Header{Key: "Host", Value: string(bytes.TrimSpace(line))})
+			} else {
+				p.addWarning(p.line-1, fmt.Sprintf("malformed header (no colon), skipped: %s", string(line)))
+			}
 			continue
 		}
 
@@ -245,27 +252,24 @@ func (p *LenientParser) parseBodyLenient(headers []Header) (body []byte, partial
 		return decoded, false
 	}
 
-	// Check Content-Length
-	cl := getContentLength(headers)
-	if cl >= 0 {
-		available := p.length - p.pos
-		if int(cl) > available {
-			p.addWarning(0, fmt.Sprintf("body: truncated, expected %d bytes but only %d available", cl, available))
-			body := make([]byte, available)
-			copy(body, p.data[p.pos:])
-			p.pos = p.length
-			return body, true
-		}
-		body := make([]byte, cl)
-		copy(body, p.data[p.pos:p.pos+int(cl)])
-		p.pos += int(cl)
-		return body, false
-	}
-
-	// No Content-Length, no chunked: remaining bytes
-	body = make([]byte, p.length-p.pos)
+	// Read all available body bytes — Content-Length is treated as advisory
+	// in lenient mode. A wrong Content-Length is a formatting inconsistency;
+	// the body data that follows is still valid and must not be discarded.
+	available := p.length - p.pos
+	body = make([]byte, available)
 	copy(body, p.data[p.pos:])
 	p.pos = p.length
+
+	cl := getContentLength(headers)
+	if cl >= 0 && int64(available) != cl {
+		p.addWarning(0, fmt.Sprintf("Content-Length declared %d, actual body is %d bytes", cl, available))
+		// If actual is less than declared the message may have been truncated
+		// in transit; signal that to the caller.
+		if int64(available) < cl {
+			return body, true
+		}
+	}
+
 	return body, false
 }
 
@@ -320,4 +324,52 @@ func trimOWSBytes(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// isHostnameLike reports whether b looks like a bare hostname or host:port,
+// e.g. "example.com", "api.example.com:8080", "192.168.1.1".
+//
+// To avoid false-positives on arbitrary bare words (method names, etc.) the
+// value must contain at least one dot OR an explicit port suffix (:\d+).
+// Pattern: [a-zA-Z0-9][a-zA-Z0-9\-.]*(:\d+)?
+func isHostnameLike(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	c0 := b[0]
+	if !((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || (c0 >= '0' && c0 <= '9')) {
+		return false
+	}
+
+	// Split off optional port suffix (colon followed entirely by digits).
+	host := b
+	hasPort := false
+	if idx := bytes.LastIndexByte(b, ':'); idx > 0 {
+		port := b[idx+1:]
+		allDigits := len(port) > 0
+		for _, ch := range port {
+			if ch < '0' || ch > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			hasPort = true
+			host = b[:idx]
+		}
+	}
+
+	hasDot := false
+	for _, ch := range host {
+		switch {
+		case (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-':
+			// valid hostname char
+		case ch == '.':
+			hasDot = true
+		default:
+			return false // space, underscore, etc. — not a hostname
+		}
+	}
+
+	return hasDot || hasPort
 }

@@ -106,6 +106,7 @@ func TestLenient_MalformedHeaderSkipped(t *testing.T) {
 }
 
 func TestLenient_TruncatedBody(t *testing.T) {
+	// CR-2: body shorter than Content-Length — read all available, warn, Partial=true.
 	data := []byte("POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nshort")
 	p := NewLenientParser(data)
 	result := p.Parse()
@@ -118,12 +119,12 @@ func TestLenient_TruncatedBody(t *testing.T) {
 	}
 	found := false
 	for _, w := range result.Warnings {
-		if strings.Contains(w, "truncated") {
+		if strings.Contains(w, "Content-Length declared") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected truncation warning, got %v", result.Warnings)
+		t.Errorf("expected Content-Length mismatch warning, got %v", result.Warnings)
 	}
 }
 
@@ -369,7 +370,7 @@ func TestLenient_PartialChunkedBody(t *testing.T) {
 }
 
 func TestLenient_TruncatedBodyResponse(t *testing.T) {
-	// Response with truncated body — should set partial=true via warning
+	// CR-2: response body shorter than Content-Length — read all available, warn, Partial=true.
 	data := []byte("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort body")
 	p := NewLenientParser(data)
 	result := p.Parse()
@@ -382,12 +383,12 @@ func TestLenient_TruncatedBodyResponse(t *testing.T) {
 	}
 	found := false
 	for _, w := range result.Warnings {
-		if strings.Contains(w, "truncated") {
+		if strings.Contains(w, "Content-Length declared") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected truncation warning, got %v", result.Warnings)
+		t.Errorf("expected Content-Length mismatch warning, got %v", result.Warnings)
 	}
 }
 
@@ -530,5 +531,160 @@ func TestParseStatusLineLenient_EmptyLine(t *testing.T) {
 	}
 	if len(p.warnings) == 0 {
 		t.Error("expected warning for empty status line")
+	}
+}
+
+// ── CR-1: bare hostname treated as implicit Host header ────────────────────
+
+func TestLenient_BareHostname(t *testing.T) {
+	// "example.com" on its own line — should become Host: example.com
+	data := []byte("POST /api/users HTTP/1.1\r\nexample.com\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if getHeader(result.Request.Headers, "Host") != "example.com" {
+		t.Errorf("Host = %q, want example.com", getHeader(result.Request.Headers, "Host"))
+	}
+	if getHeader(result.Request.Headers, "Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", getHeader(result.Request.Headers, "Content-Type"))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "implicit Host header") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected implicit Host header warning, got %v", result.Warnings)
+	}
+}
+
+func TestLenient_BareHostnameWithPort(t *testing.T) {
+	// "localhost:8080" contains a colon, so it is parsed by the normal
+	// key:value path (key="localhost", value="8080") — NOT as a Host header.
+	// Treating it as Host would risk false-positives on legitimate numeric-valued
+	// headers such as "Content-Length: 42". Bare host:port detection requires a
+	// future CR with a dedicated safe heuristic.
+	data := []byte("GET /health HTTP/1.1\r\nlocalhost:8080\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	// Parsed as header key="localhost", value="8080"
+	if getHeader(result.Request.Headers, "localhost") != "8080" {
+		t.Errorf("expected header {localhost: 8080}, got headers: %v", result.Request.Headers)
+	}
+}
+
+func TestLenient_BareHostnameIP(t *testing.T) {
+	// IP address — should become Host: 192.168.1.1
+	data := []byte("GET / HTTP/1.1\r\n192.168.1.1\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if getHeader(result.Request.Headers, "Host") != "192.168.1.1" {
+		t.Errorf("Host = %q, want 192.168.1.1", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_BareWord_NotHostname(t *testing.T) {
+	// "localhost" — no dot, no port — should still be skipped (not treated as Host)
+	data := []byte("GET / HTTP/1.1\r\nlocalhost\r\nAccept: */*\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if getHeader(result.Request.Headers, "Host") != "" {
+		t.Errorf("Host = %q, want empty — bare word without dot/port should not become Host", getHeader(result.Request.Headers, "Host"))
+	}
+	// Should still have a malformed-header warning
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "malformed header") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected malformed header warning for bare word, got %v", result.Warnings)
+	}
+}
+
+// ── CR-2: Content-Length treated as advisory ───────────────────────────────
+
+func TestLenient_ContentLength_BodyLonger(t *testing.T) {
+	// Body is longer than Content-Length — read all bytes, warn, Partial=false.
+	data := []byte("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello world")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if string(result.Request.Body) != "hello world" {
+		t.Errorf("Body = %q, want hello world (full body, not truncated at Content-Length)", string(result.Request.Body))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "Content-Length declared") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Content-Length mismatch warning, got %v", result.Warnings)
+	}
+	if result.Partial {
+		t.Error("Partial = true, want false — actual body exceeds declared length, nothing is missing")
+	}
+}
+
+func TestLenient_ContentLength_BodyShorter(t *testing.T) {
+	// Body is shorter than Content-Length — read all available bytes, warn, Partial=true.
+	data := []byte("POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nonly this")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if string(result.Request.Body) != "only this" {
+		t.Errorf("Body = %q, want only this", string(result.Request.Body))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "Content-Length declared") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected Content-Length mismatch warning, got %v", result.Warnings)
+	}
+}
+
+func TestLenient_ContentLength_Exact(t *testing.T) {
+	// Content-Length matches exactly — no warning, no Partial.
+	data := []byte("POST / HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if string(result.Request.Body) != "hello" {
+		t.Errorf("Body = %q, want hello", string(result.Request.Body))
+	}
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "Content-Length") {
+			t.Errorf("unexpected Content-Length warning when lengths match: %s", w)
+		}
 	}
 }
