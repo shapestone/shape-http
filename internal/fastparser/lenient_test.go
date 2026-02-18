@@ -563,11 +563,9 @@ func TestLenient_BareHostname(t *testing.T) {
 }
 
 func TestLenient_BareHostnameWithPort(t *testing.T) {
-	// "localhost:8080" contains a colon, so it is parsed by the normal
-	// key:value path (key="localhost", value="8080") — NOT as a Host header.
-	// Treating it as Host would risk false-positives on legitimate numeric-valued
-	// headers such as "Content-Length: 42". Bare host:port detection requires a
-	// future CR with a dedicated safe heuristic.
+	// "localhost:8080" — single-label host with a numeric port.
+	// isSingleLabelHost detects the key and isPortStr detects the value,
+	// so CR-3 now correctly converts it to Host: localhost:8080.
 	data := []byte("GET /health HTTP/1.1\r\nlocalhost:8080\r\n\r\n")
 	p := NewLenientParser(data)
 	result := p.Parse()
@@ -575,9 +573,17 @@ func TestLenient_BareHostnameWithPort(t *testing.T) {
 	if result.Request == nil {
 		t.Fatal("expected request")
 	}
-	// Parsed as header key="localhost", value="8080"
-	if getHeader(result.Request.Headers, "localhost") != "8080" {
-		t.Errorf("expected header {localhost: 8080}, got headers: %v", result.Request.Headers)
+	if getHeader(result.Request.Headers, "Host") != "localhost:8080" {
+		t.Errorf("Host = %q, want localhost:8080", getHeader(result.Request.Headers, "Host"))
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "bare host:port") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected bare host:port warning, got %v", result.Warnings)
 	}
 }
 
@@ -667,6 +673,84 @@ func TestLenient_ContentLength_BodyShorter(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected Content-Length mismatch warning, got %v", result.Warnings)
+	}
+}
+
+// ── IPv6 literal address handling ──────────────────────────────────────────
+
+func TestLenient_IPv6_BareHeaderLine(t *testing.T) {
+	// "[::1]" on its own header line → Host: [::1]
+	data := []byte("GET / HTTP/1.1\r\n[::1]\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if getHeader(result.Request.Headers, "Host") != "[::1]" {
+		t.Errorf("Host = %q, want [::1]", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_IPv6_BareHeaderLineWithPort(t *testing.T) {
+	// "[::1]:8080" on its own header line → Host: [::1]:8080
+	data := []byte("POST /api HTTP/1.1\r\n[::1]:8080\r\nContent-Type: application/json\r\n\r\n{}")
+	p := NewLenientParser(data)
+	result := p.Parse()
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if getHeader(result.Request.Headers, "Host") != "[::1]:8080" {
+		t.Errorf("Host = %q, want [::1]:8080", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_IPv6_PathWithPort(t *testing.T) {
+	// GET [::1]:8080/api/users HTTP/1.1
+	data := []byte("GET [::1]:8080/api/users HTTP/1.1\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "[::1]:8080" {
+		t.Errorf("Host = %q, want [::1]:8080", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+func TestLenient_IPv6_PathNoPort(t *testing.T) {
+	// GET [::1]/api/users HTTP/1.1
+	data := []byte("GET [::1]/api/users HTTP/1.1\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "[::1]" {
+		t.Errorf("Host = %q, want [::1]", getHeader(result.Request.Headers, "Host"))
+	}
+}
+
+// ── localhost (single-label host) ──────────────────────────────────────────
+
+func TestLenient_Localhost_PathWithPort(t *testing.T) {
+	// GET localhost:8080/api/users — path prefix form
+	data := []byte("GET localhost:8080/api/users\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+	if result.Request == nil {
+		t.Fatal("expected request")
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if getHeader(result.Request.Headers, "Host") != "localhost:8080" {
+		t.Errorf("Host = %q, want localhost:8080", getHeader(result.Request.Headers, "Host"))
 	}
 }
 

@@ -200,8 +200,39 @@ func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impli
 		return urlPath, ""
 	}
 
-	// Bare authority prefix: "host:port/path" or "hostname.tld/path".
-	// The prefix before the first '/' must look like a hostname or host:port.
+	// IPv6 literal prefix: "[::1]/api" or "[::1]:8080/api".
+	if len(path) > 0 && path[0] == '[' {
+		close := strings.IndexByte(path, ']')
+		if close > 0 {
+			bracket := path[:close+1] // "[::1]"
+			rest := path[close+1:]    // "/api" or ":8080/api" or ""
+			if strings.IndexByte(bracket, ':') > 0 {
+				// Has at least one colon inside brackets — looks like IPv6.
+				if len(rest) > 0 && rest[0] == '/' {
+					// "[::1]/api"
+					p.addWarning(1, fmt.Sprintf("request-target %q contains bare IPv6 host prefix, extracted Host %q, using path %q", path, bracket, rest))
+					return rest, bracket
+				}
+				if len(rest) > 1 && rest[0] == ':' {
+					// "[::1]:8080/api" — slashIdx is relative to rest[1:].
+					slashIdx := strings.IndexByte(rest[1:], '/')
+					if slashIdx >= 0 {
+						portPart := rest[1 : 1+slashIdx] // "8080"
+						urlPath := rest[1+slashIdx:]     // "/api/users" (includes leading /)
+						if isPortStr(portPart) {
+							authority := bracket + ":" + portPart
+							p.addWarning(1, fmt.Sprintf("request-target %q contains bare IPv6 host prefix, extracted Host %q, using path %q", path, authority, urlPath))
+							return urlPath, authority
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Bare authority prefix: "host:port/path", "hostname.tld/path", or
+	// "localhost:port/path" (bare word with port — no dot required when a
+	// port is present, because the port itself disambiguates from method names).
 	if len(path) > 0 {
 		c0 := path[0]
 		if (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || (c0 >= '0' && c0 <= '9') {
@@ -294,7 +325,20 @@ func (p *LenientParser) parseHeadersLenient() []Header {
 			line = append(line, bytes.TrimLeft(cont, " \t")...)
 		}
 
-		// Parse "Key: Value" — lenient: accept whitespace before colon
+		// Parse "Key: Value" — lenient: accept whitespace before colon.
+
+		// IPv6 literals start with '[' and contain colons inside the brackets,
+		// which confuses the normal colon-splitting logic. Handle them first.
+		if len(line) > 0 && line[0] == '[' {
+			if h := parseIPv6HostLine(line); h != "" {
+				p.addWarning(p.line-1, fmt.Sprintf("bare IPv6 address %q treated as implicit Host header", h))
+				headers = append(headers, Header{Key: "Host", Value: h})
+			} else {
+				p.addWarning(p.line-1, fmt.Sprintf("malformed header (no colon), skipped: %s", string(line)))
+			}
+			continue
+		}
+
 		colon := bytes.IndexByte(line, ':')
 		if colon < 0 {
 			// No colon — check if the line looks like a bare hostname/host:port.
@@ -316,13 +360,16 @@ func (p *LenientParser) parseHeadersLenient() []Header {
 
 		value := string(trimOWSBytes(line[colon+1:]))
 
-		// CR-3: a key that looks like a hostname (contains a dot, only hostname
-		// chars) paired with an all-digit value is a bare "host:port" line that
-		// was split on its colon. Header field-names never contain dots in
-		// practice, so this is an unambiguous false parse that must be fixed.
-		// Example: "example.com:8080" → Header{Key:"example.com", Value:"8080"}
-		//                             → Host: example.com:8080
-		if isHostnameKeyStr(key) && isPortStr(value) {
+		// CR-3: a bare "host:port" line split on its colon.
+		//
+		// Two cases are detected:
+		//   a) key contains a dot (e.g. "example.com") — dot is the primary
+		//      discriminator because HTTP header names never contain dots.
+		//   b) key is a single-label name with no hyphen and all lowercase/digit
+		//      chars (e.g. "localhost") — the all-digit port value provides
+		//      sufficient disambiguation from real headers, which either contain
+		//      hyphens (Content-Type) or start with an uppercase letter (Accept).
+		if (isHostnameKeyStr(key) || isSingleLabelHost(key)) && isPortStr(value) {
 			hostPort := key + ":" + value
 			p.addWarning(p.line-1, fmt.Sprintf("bare host:port %q treated as implicit Host header", hostPort))
 			headers = append(headers, Header{Key: "Host", Value: hostPort})
@@ -425,6 +472,37 @@ func trimOWSBytes(b []byte) []byte {
 	return b
 }
 
+// parseIPv6HostLine parses a raw header line that starts with '[' and returns
+// the host authority string ("[::1]" or "[::1]:8080") if the line looks like
+// a bare IPv6 address, or "" if it does not.
+func parseIPv6HostLine(line []byte) string {
+	if len(line) < 3 || line[0] != '[' {
+		return ""
+	}
+	close := bytes.IndexByte(line, ']')
+	if close < 0 {
+		return ""
+	}
+	inner := line[1:close]
+	// Must contain at least one colon to be IPv6 (not just "[word]").
+	if bytes.IndexByte(inner, ':') < 0 {
+		return ""
+	}
+	host := string(line[:close+1]) // "[::1]"
+	rest := line[close+1:]
+	if len(rest) == 0 {
+		return host
+	}
+	// Optional port suffix ":digits"
+	if len(rest) > 1 && rest[0] == ':' {
+		port := rest[1:]
+		if isPortStr(string(port)) {
+			return host + ":" + string(port) // "[::1]:8080"
+		}
+	}
+	return "" // unexpected suffix — not a bare host line
+}
+
 // isHostnameKeyStr reports whether s looks like a hostname suitable for use
 // as the key part of a bare host:port header line (CR-3). Requirements:
 // non-empty, at least one dot (dot is the discriminator since legitimate
@@ -449,6 +527,24 @@ func isHostnameKeyStr(s string) bool {
 	return hasDot
 }
 
+// isSingleLabelHost reports whether s looks like a single-label hostname
+// (e.g. "localhost", "db", "myserver") — no dot, no hyphen, only lowercase
+// letters and digits. Used in CR-3 when a key:value pair has an all-digit
+// value: the numeric port disambiguates from legitimate HTTP headers, which
+// either contain hyphens (Content-Type) or start with uppercase (Accept).
+func isSingleLabelHost(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 // isPortStr reports whether s is a non-empty string of ASCII digits (a port number).
 func isPortStr(s string) bool {
 	if s == "" {
@@ -463,10 +559,12 @@ func isPortStr(s string) bool {
 }
 
 // isHostnameLike reports whether b looks like a bare hostname or host:port,
-// e.g. "example.com", "api.example.com:8080", "192.168.1.1".
+// e.g. "example.com", "api.example.com:8080", "192.168.1.1", "localhost:8080".
 //
 // To avoid false-positives on arbitrary bare words (method names, etc.) the
 // value must contain at least one dot OR an explicit port suffix (:\d+).
+// A bare word with a port (e.g. "localhost:8080") is accepted because the
+// numeric port suffix unambiguously distinguishes it from a method name.
 // Pattern: [a-zA-Z0-9][a-zA-Z0-9\-.]*(:\d+)?
 func isHostnameLike(b []byte) bool {
 	if len(b) == 0 {
