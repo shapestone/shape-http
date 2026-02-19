@@ -45,7 +45,22 @@ func (p *LenientParser) Parse() *ParseResult {
 		return result
 	}
 
-	if bytes.HasPrefix(p.data, []byte("HTTP/")) {
+	// RFC 9112 §2.2: skip leading blank lines before the start-line.
+	for p.pos < p.length && (p.data[p.pos] == '\r' || p.data[p.pos] == '\n') {
+		if p.data[p.pos] == '\n' {
+			p.line++
+		}
+		p.pos++
+	}
+
+	if p.pos >= p.length {
+		p.addWarning(1, "empty input")
+		result.Partial = true
+		result.Warnings = p.warnings
+		return result
+	}
+
+	if bytes.HasPrefix(p.data[p.pos:], []byte("HTTP/")) {
 		resp := p.parseResponseLenient()
 		result.Response = resp
 	} else {

@@ -1036,3 +1036,92 @@ func TestLenient_ContentLength_Exact(t *testing.T) {
 		}
 	}
 }
+
+// TestLenient_LeadingBlankLines verifies that one or more blank lines before
+// the request-line are silently skipped per RFC 9112 §2.2.
+func TestLenient_LeadingBlankLines_Request(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{"single bare LF", "\nPOST example.com:8080/api/users HTTP/1.1\nContent-Type: application/json\n\n{\"name\":\"John\"}"},
+		{"single CRLF", "\r\nPOST example.com:8080/api/users HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"name\":\"John\"}"},
+		{"multiple bare LF", "\n\n\nPOST /api HTTP/1.1\nHost: example.com\n\n"},
+		{"multiple CRLF", "\r\n\r\nPOST /api HTTP/1.1\r\nHost: example.com\r\n\r\n"},
+		{"mixed CR and LF", "\r\n\nPOST /api HTTP/1.1\r\nHost: example.com\r\n\r\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewLenientParser([]byte(tc.data))
+			result := p.Parse()
+
+			if result.Request == nil {
+				t.Fatalf("expected request, got nil; warnings: %v", result.Warnings)
+			}
+			if result.Request.Method == "" {
+				t.Errorf("Method is empty; warnings: %v", result.Warnings)
+			}
+			// No warning should mention "empty request line"
+			for _, w := range result.Warnings {
+				if strings.Contains(w, "empty request line") {
+					t.Errorf("unexpected warning %q: leading blank lines should be silently skipped", w)
+				}
+			}
+		})
+	}
+}
+
+// TestLenient_LeadingBlankLines_Response verifies leading blank lines are
+// skipped before a response status-line as well.
+func TestLenient_LeadingBlankLines_Response(t *testing.T) {
+	data := "\r\nHTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"
+	p := NewLenientParser([]byte(data))
+	result := p.Parse()
+
+	if result.Response == nil {
+		t.Fatalf("expected response, got nil; warnings: %v", result.Warnings)
+	}
+	if result.Response.StatusCode != 200 {
+		t.Errorf("StatusCode = %d, want 200", result.Response.StatusCode)
+	}
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "empty") {
+			t.Errorf("unexpected warning %q: leading blank lines should be silently skipped", w)
+		}
+	}
+}
+
+// TestLenient_LeadingBlankLines_BareAuth is the exact reproduction case from
+// the change request: leading newline before a bare-authority request-target.
+func TestLenient_LeadingBlankLines_BareAuth(t *testing.T) {
+	// Bare LF before the request-line, plus bare-authority host:port prefix.
+	data := "\nPOST example.com:8080/api/users HTTP/1.1\nContent-Type: application/json\nContent-Length: 15\n\n{\"name\":\"John\"}"
+	p := NewLenientParser([]byte(data))
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil; warnings: %v", result.Warnings)
+	}
+	if result.Request.Method != "POST" {
+		t.Errorf("Method = %q, want POST", result.Request.Method)
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	host := ""
+	for _, h := range result.Request.Headers {
+		if h.Key == "Host" {
+			host = h.Value
+			break
+		}
+	}
+	if host != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", host)
+	}
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "empty request line") {
+			t.Errorf("unexpected warning %q: leading blank lines should be silently skipped", w)
+		}
+	}
+}
