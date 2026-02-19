@@ -27,6 +27,7 @@ func UnmarshalLenient(data []byte) *ParseResult {
 			Method:  internal.Request.Method,
 			Path:    internal.Request.Path,
 			Version: internal.Request.Version,
+			Scheme:  internal.Request.Scheme,
 			Headers: convertHeaders(internal.Request.Headers),
 			Body:    internal.Request.Body,
 		}

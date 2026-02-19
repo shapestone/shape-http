@@ -75,6 +75,9 @@ func requestToNode(req *fastparser.Request) ast.SchemaNode {
 		"headers": headersToNode(req.Headers),
 	}
 
+	if req.Scheme != "" {
+		props["scheme"] = ast.NewLiteralNode(req.Scheme, zeroPos)
+	}
 	if req.Body != nil {
 		props["body"] = ast.NewLiteralNode(string(req.Body), zeroPos)
 	}
@@ -132,6 +135,11 @@ func NodeToRequest(node ast.SchemaNode) (*fastparser.Request, error) {
 	if v, ok := props["version"]; ok {
 		if lit, ok := v.(*ast.LiteralNode); ok {
 			req.Version, _ = lit.Value().(string)
+		}
+	}
+	if v, ok := props["scheme"]; ok {
+		if lit, ok := v.(*ast.LiteralNode); ok {
+			req.Scheme, _ = lit.Value().(string)
 		}
 	}
 	if v, ok := props["headers"]; ok {

@@ -399,3 +399,69 @@ func TestUnmarshalLenient_Case6_BareAuthorityNoPort(t *testing.T) {
 		t.Errorf("Host = %q, want example.com", result.Request.Headers.Get("Host"))
 	}
 }
+
+// TestUnmarshalLenient_Scheme_HTTPS verifies that the public ParseResult carries
+// the scheme extracted from an absolute-form https:// request-target.
+func TestUnmarshalLenient_Scheme_HTTPS(t *testing.T) {
+	data := []byte("POST https://example.com:8080/api/users HTTP/1.1\r\nContent-Type: application/json\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil; warnings: %v", result.Warnings)
+	}
+	if result.Request.Scheme != "https" {
+		t.Errorf("Scheme = %q, want \"https\"", result.Request.Scheme)
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	if result.Request.Headers.Get("Host") != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", result.Request.Headers.Get("Host"))
+	}
+}
+
+// TestUnmarshalLenient_Scheme_HTTP verifies http:// scheme capture.
+func TestUnmarshalLenient_Scheme_HTTP(t *testing.T) {
+	data := []byte("GET http://api.example.com/v1/items HTTP/1.1\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil")
+	}
+	if result.Request.Scheme != "http" {
+		t.Errorf("Scheme = %q, want \"http\"", result.Request.Scheme)
+	}
+}
+
+// TestUnmarshalLenient_Scheme_OriginForm verifies that origin-form targets
+// leave Scheme empty.
+func TestUnmarshalLenient_Scheme_OriginForm(t *testing.T) {
+	data := []byte("GET /api/users HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil")
+	}
+	if result.Request.Scheme != "" {
+		t.Errorf("Scheme = %q, want empty for origin-form", result.Request.Scheme)
+	}
+}
+
+// TestUnmarshalLenient_Scheme_BareAuthority_NoScheme verifies that bare-authority
+// targets (no scheme) leave Scheme empty.
+func TestUnmarshalLenient_Scheme_BareAuthority_NoScheme(t *testing.T) {
+	data := []byte("POST example.com:9090/path HTTP/1.1\r\n\r\n")
+	result := UnmarshalLenient(data)
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil")
+	}
+	if result.Request.Scheme != "" {
+		t.Errorf("Scheme = %q, want empty for bare-authority target", result.Request.Scheme)
+	}
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "absolute-form") {
+			t.Errorf("unexpected absolute-form warning for bare-authority target: %s", w)
+		}
+	}
+}

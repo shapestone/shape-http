@@ -13,6 +13,7 @@ type Request struct {
 	Method  string
 	Path    string
 	Version string
+	Scheme  string // "https", "http", or "" — populated from absolute-form targets
 	Headers []Header
 	Body    []byte
 }

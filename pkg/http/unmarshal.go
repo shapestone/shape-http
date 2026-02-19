@@ -75,6 +75,7 @@ func unmarshalRequest(data []byte, target *Request) error {
 	target.Method = req.Method
 	target.Path = req.Path
 	target.Version = req.Version
+	target.Scheme = req.Scheme
 	target.Headers = convertHeaders(req.Headers)
 	target.Body = req.Body
 	return nil

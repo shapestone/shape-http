@@ -15,6 +15,7 @@ func NodeToRequest(node ast.SchemaNode) (*Request, error) {
 		Method:  fpReq.Method,
 		Path:    fpReq.Path,
 		Version: fpReq.Version,
+		Scheme:  fpReq.Scheme,
 		Headers: convertHeaders(fpReq.Headers),
 		Body:    fpReq.Body,
 	}, nil
@@ -45,6 +46,9 @@ func RequestToNode(req *Request) ast.SchemaNode {
 		"path":    ast.NewLiteralNode(req.Path, zeroPos),
 		"version": ast.NewLiteralNode(req.Version, zeroPos),
 		"headers": pubHeadersToNode(req.Headers),
+	}
+	if req.Scheme != "" {
+		props["scheme"] = ast.NewLiteralNode(req.Scheme, zeroPos)
 	}
 	if req.Body != nil {
 		props["body"] = ast.NewLiteralNode(string(req.Body), zeroPos)

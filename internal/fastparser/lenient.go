@@ -87,11 +87,12 @@ func (p *LenientParser) parseRequestLenient() *Request {
 	// Normalize path: extract implicit Host from absolute-form URLs and bare
 	// authority prefixes (e.g. "https://example.com/api" → "/api",
 	// "example.com:8080/api" → "/api"). Returns the implied host authority or "".
-	path, impliedHost := p.normalizePathLenient(path)
+	path, impliedHost, scheme := p.normalizePathLenient(path)
 
 	req.Method = method
 	req.Path = path
 	req.Version = version
+	req.Scheme = scheme
 
 	// Parse headers
 	req.Headers = p.parseHeadersLenient()
@@ -174,24 +175,27 @@ func (p *LenientParser) parseRequestLineLenient(line []byte) (method, path, vers
 }
 
 // normalizePathLenient inspects the request-target for embedded host
-// information and returns the normalized path plus the extracted host authority.
+// information and returns the normalized path, the extracted host authority,
+// and the scheme (if the target was in absolute-form).
 //
 // Handled patterns:
 //
-//	Absolute-form:    "https://example.com:8080/api" → path="/api",   host="example.com:8080"
-//	Absolute no path: "https://example.com"          → path="/",      host="example.com"
-//	Bare host+port:   "example.com:8080/api"         → path="/api",   host="example.com:8080"
-//	Bare hostname:    "example.com/api"              → path="/api",   host="example.com"
+//	Absolute-form:    "https://example.com:8080/api" → path="/api",   host="example.com:8080", scheme="https"
+//	Absolute no path: "https://example.com"          → path="/",      host="example.com",      scheme="https"
+//	Bare host+port:   "example.com:8080/api"         → path="/api",   host="example.com:8080", scheme=""
+//	Bare hostname:    "example.com/api"              → path="/api",   host="example.com",      scheme=""
 //
-// Returns (path, "") when no host is embedded.
-func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impliedHost string) {
+// Returns (path, "", "") when no host is embedded.
+func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impliedHost, scheme string) {
 	// Absolute-form: http:// or https://
 	schemeLen := 0
 	switch {
 	case len(path) >= 8 && path[:8] == "https://":
 		schemeLen = 8
+		scheme = "https"
 	case len(path) >= 7 && path[:7] == "http://":
 		schemeLen = 7
+		scheme = "http"
 	}
 	if schemeLen > 0 {
 		rest := path[schemeLen:] // "authority/path" or just "authority"
@@ -210,9 +214,9 @@ func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impli
 		}
 		if authority != "" {
 			p.addWarning(1, fmt.Sprintf("absolute-form request-target: extracted Host %q, using path %q", authority, urlPath))
-			return urlPath, authority
+			return urlPath, authority, scheme
 		}
-		return urlPath, ""
+		return urlPath, "", scheme
 	}
 
 	// IPv6 literal prefix: "[::1]/api" or "[::1]:8080/api".
@@ -226,7 +230,7 @@ func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impli
 				if len(rest) > 0 && rest[0] == '/' {
 					// "[::1]/api"
 					p.addWarning(1, fmt.Sprintf("request-target %q contains bare IPv6 host prefix, extracted Host %q, using path %q", path, bracket, rest))
-					return rest, bracket
+					return rest, bracket, ""
 				}
 				if len(rest) > 1 && rest[0] == ':' {
 					// "[::1]:8080/api" — slashIdx is relative to rest[1:].
@@ -237,7 +241,7 @@ func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impli
 						if isPortStr(portPart) {
 							authority := bracket + ":" + portPart
 							p.addWarning(1, fmt.Sprintf("request-target %q contains bare IPv6 host prefix, extracted Host %q, using path %q", path, authority, urlPath))
-							return urlPath, authority
+							return urlPath, authority, ""
 						}
 					}
 				}
@@ -257,13 +261,13 @@ func (p *LenientParser) normalizePathLenient(path string) (normalizedPath, impli
 				rest := path[slashIdx:] // includes leading /
 				if isHostnameLike([]byte(prefix)) {
 					p.addWarning(1, fmt.Sprintf("request-target %q contains bare host prefix, extracted Host %q, using path %q", path, prefix, rest))
-					return rest, prefix
+					return rest, prefix, ""
 				}
 			}
 		}
 	}
 
-	return path, ""
+	return path, "", ""
 }
 
 func (p *LenientParser) parseStatusLineLenient(line []byte) (version string, statusCode int, reason string) {

@@ -1125,3 +1125,81 @@ func TestLenient_LeadingBlankLines_BareAuth(t *testing.T) {
 		}
 	}
 }
+
+// TestLenient_Scheme_AbsoluteHTTPS verifies that the scheme is extracted from
+// an https:// absolute-form request-target.
+func TestLenient_Scheme_AbsoluteHTTPS(t *testing.T) {
+	data := []byte("POST https://example.com:8080/api/users HTTP/1.1\r\nContent-Type: application/json\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil; warnings: %v", result.Warnings)
+	}
+	if result.Request.Scheme != "https" {
+		t.Errorf("Scheme = %q, want \"https\"", result.Request.Scheme)
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+	host := ""
+	for _, h := range result.Request.Headers {
+		if h.Key == "Host" {
+			host = h.Value
+			break
+		}
+	}
+	if host != "example.com:8080" {
+		t.Errorf("Host = %q, want example.com:8080", host)
+	}
+}
+
+// TestLenient_Scheme_AbsoluteHTTP verifies that http:// scheme is captured.
+func TestLenient_Scheme_AbsoluteHTTP(t *testing.T) {
+	data := []byte("GET http://api.example.com/v1/items HTTP/1.1\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil")
+	}
+	if result.Request.Scheme != "http" {
+		t.Errorf("Scheme = %q, want \"http\"", result.Request.Scheme)
+	}
+	if result.Request.Path != "/v1/items" {
+		t.Errorf("Path = %q, want /v1/items", result.Request.Path)
+	}
+}
+
+// TestLenient_Scheme_OriginForm verifies that origin-form requests have an
+// empty Scheme (no scheme present in the request-target).
+func TestLenient_Scheme_OriginForm(t *testing.T) {
+	data := []byte("GET /api/users HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil")
+	}
+	if result.Request.Scheme != "" {
+		t.Errorf("Scheme = %q, want empty string for origin-form target", result.Request.Scheme)
+	}
+}
+
+// TestLenient_Scheme_BareAuthority verifies that bare-authority prefixes
+// (no scheme) also leave Scheme empty.
+func TestLenient_Scheme_BareAuthority(t *testing.T) {
+	data := []byte("POST example.com:8080/api/users HTTP/1.1\r\n\r\n")
+	p := NewLenientParser(data)
+	result := p.Parse()
+
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil")
+	}
+	if result.Request.Scheme != "" {
+		t.Errorf("Scheme = %q, want empty string for bare-authority target", result.Request.Scheme)
+	}
+	if result.Request.Path != "/api/users" {
+		t.Errorf("Path = %q, want /api/users", result.Request.Path)
+	}
+}

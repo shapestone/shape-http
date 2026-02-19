@@ -28,6 +28,7 @@ type Request struct {
 	Method  string  // "GET", "POST", etc.
 	Path    string  // request-target "/api/users?q=foo"
 	Version string  // "HTTP/1.1"
+	Scheme  string  // "https", "http", or "" — set when request-target was absolute-form
 	Headers Headers // ordered, repeatable headers
 	Body    []byte  // raw body (nil if none)
 }
