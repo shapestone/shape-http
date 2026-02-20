@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -308,5 +309,92 @@ func FuzzParse(f *testing.F) {
 			}
 		}()
 		_, _ = Parse(input)
+	})
+}
+
+// FuzzParseCurl fuzzes the curl command parser.
+//
+// Invariants:
+//   - ParseCurl never panics on any input
+//   - ParseCurl never returns nil
+//   - When result.Partial is false, result.Request must be non-nil
+func FuzzParseCurl(f *testing.F) {
+	// Seed corpus: valid curl commands covering all flag types
+	f.Add(`curl https://api.example.com/users`)
+	f.Add(`curl -X POST https://api.example.com/users -H "Content-Type: application/json" -d '{"name":"Alice"}'`)
+	f.Add(`curl -X PUT https://api.example.com/users/1 -H "Authorization: Bearer tok" -d '{"active":false}'`)
+	f.Add(`curl -X DELETE https://api.example.com/users/42`)
+	f.Add(`curl -X PATCH https://api.example.com/users/7 -d '{"email":"new@x.com"}'`)
+	f.Add(`curl -I https://api.example.com/health`)
+	f.Add(`curl -u admin:secret https://api.example.com/admin`)
+	f.Add(`curl -H "Authorization: Bearer eyJ.payload.sig" https://api.example.com/me`)
+	f.Add(`curl -v -s -k -L --compressed https://api.example.com/`)
+	f.Add(`curl --http2 https://api.example.com/h2`)
+	f.Add(`curl --http3 https://api.example.com/h3`)
+	f.Add(`curl -F "name=Alice" -F "role=admin" https://api.example.com/profile`)
+	f.Add(`curl --data-urlencode "q=hello world" https://api.example.com/search`)
+	f.Add(`curl -X POST https://api.example.com/form -d 'a=1' -d 'b=2'`)
+	f.Add(`curl -o /tmp/out.json https://api.example.com/export`)
+	f.Add(`curl -A "TestAgent/1.0" https://api.example.com/`)
+	f.Add("curl -X POST \\\n  https://api.example.com/users \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"name\":\"Bob\"}'")
+	f.Add(`curl --data-raw '{"query":"{ me { id } }"}' https://api.example.com/graphql`)
+	f.Add(`curl --data-binary '{"b":true}' https://api.example.com/raw`)
+	f.Add(`https://api.example.com/no-curl-prefix`)
+	f.Add(`curl http://localhost:3000/api/health`)
+	f.Add(`curl http://127.0.0.1:8080/v1/data`)
+	f.Add(`curl -X POST https://api.example.com/ -H "Content-Type: application/x-www-form-urlencoded" -d 'grant_type=cc&client_id=x'`)
+	// Edge / pathological inputs
+	f.Add(``)
+	f.Add(`curl`)
+	f.Add(`curl -X`)
+	f.Add(`curl -H`)
+	f.Add(`curl -d`)
+	f.Add(`curl -X POST`)
+	f.Add(`curl -u`)
+	f.Add(`curl -F`)
+	f.Add(`curl --unknown-flag https://x.com/`)
+	f.Add(`curl -H "bad header no colon" https://x.com/`)
+	f.Add(`curl -d @/etc/passwd https://x.com/`)
+	f.Add(`curl -F "file=@/tmp/big.bin" https://x.com/`)
+	f.Add(`curl "https://x.com/path with spaces"`)
+	f.Add("curl -H \"unclosed")
+	f.Add(`curl 'unclosed`)
+	f.Add(`curl -X POST -X GET https://x.com/`) // conflicting -X flags
+	f.Add(`curl ` + strings.Repeat("-H \"X-H: v\" ", 50) + `https://x.com/`)
+	f.Add(`curl https://x.com/` + strings.Repeat("a", 4096))
+	f.Add(`curl -d '` + strings.Repeat("x", 65536) + `' https://x.com/`)
+	f.Add("curl \x00 https://x.com/")
+	f.Add("curl \xff\xfe https://x.com/")
+	f.Add(`curl --http2 --http3 https://x.com/`) // conflicting version flags
+
+	f.Fuzz(func(t *testing.T, cmd string) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("ParseCurl panicked on input %q: %v", cmd, r)
+			}
+		}()
+
+		result := ParseCurl(cmd)
+
+		// Invariant: result is never nil
+		if result == nil {
+			t.Errorf("ParseCurl(%q) returned nil", cmd)
+			return
+		}
+
+		// Invariant: if not partial, Request must be set
+		if !result.Partial && result.Request == nil {
+			t.Errorf("ParseCurl(%q): Partial=false but Request=nil; warnings=%v", cmd, result.Warnings)
+		}
+
+		// Invariant: if Request is set, method must be non-empty
+		if result.Request != nil && result.Request.Method == "" {
+			t.Errorf("ParseCurl(%q): Request.Method is empty; warnings=%v", cmd, result.Warnings)
+		}
+
+		// Invariant: if Request is set, path must start with /
+		if result.Request != nil && result.Request.Path != "" && result.Request.Path[0] != '/' {
+			t.Errorf("ParseCurl(%q): Request.Path %q does not start with /", cmd, result.Request.Path)
+		}
 	})
 }
