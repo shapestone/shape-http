@@ -35,9 +35,25 @@ func (cp *curlParser) parse(cmd string) *ParseResult {
 		return result
 	}
 
+	// Strip comment lines (first non-whitespace char is '#') and markdown
+	// separators (lines whose trimmed content is only '-' chars, e.g. "---").
+	// This lets users paste curl commands together with surrounding commentary
+	// without those lines being misinterpreted as flags or URLs.
+	cmd = stripNonCurlLines(cmd)
+
+	if strings.TrimSpace(cmd) == "" {
+		cp.warn("empty curl command")
+		result.Partial = true
+		return result
+	}
+
 	// Normalize backslash line continuations before tokenizing.
 	cmd = strings.ReplaceAll(cmd, "\\\r\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\\\n", " ")
+	// Treat any remaining newlines as token separators (same as spaces).
+	cmd = strings.ReplaceAll(cmd, "\r\n", " ")
+	cmd = strings.ReplaceAll(cmd, "\n", " ")
+	cmd = strings.ReplaceAll(cmd, "\r", " ")
 
 	tokens, err := shellSplit(cmd)
 	if err != nil {
@@ -287,11 +303,19 @@ func parseCurlURL(rawURL string) (scheme, host, path string) {
 		scheme = "http"
 		rawURL = rawURL[7:]
 	default:
-		// No scheme — return as-is (could be "/path" or "host/path").
-		if !strings.HasPrefix(rawURL, "/") {
-			rawURL = "/" + rawURL
+		// No scheme present.
+		if strings.HasPrefix(rawURL, "/") {
+			// Already an absolute path — no host component.
+			return "", "", rawURL
 		}
-		return "", "", rawURL
+		// Bare host or host/path: "example.com/api", "localhost:8080/api",
+		// "192.168.0.50/api/users". Split at the first slash.
+		slashIdx := strings.IndexByte(rawURL, '/')
+		if slashIdx < 0 {
+			// e.g. "example.com" — host only, root path.
+			return "", rawURL, "/"
+		}
+		return "", rawURL[:slashIdx], rawURL[slashIdx:]
 	}
 
 	slashIdx := strings.IndexByte(rawURL, '/')
@@ -435,6 +459,29 @@ func buildURLEncoded(fields []string) string {
 		}
 	}
 	return strings.Join(parts, "&")
+}
+
+// stripNonCurlLines removes lines that are not part of a curl command:
+//   - Lines whose first non-whitespace character is '#' (shell comments)
+//   - Lines whose trimmed content consists entirely of '-' characters (e.g. "---")
+//
+// This lets callers pass a curl command together with surrounding commentary
+// (e.g. copied from a README or API doc) without those lines being
+// misinterpreted as flags or URLs.
+func stripNonCurlLines(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t\r")
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if len(trimmed) > 0 && strings.Trim(trimmed, "-") == "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
 
 // expandShortFlags expands compound short flags (e.g. -sS → -s -S, -vk → -v -k).

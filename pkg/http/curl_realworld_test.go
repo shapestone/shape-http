@@ -944,3 +944,181 @@ func TestCurlRW_77_UserNoPassword(t *testing.T) {
 		t.Errorf("expected warning about missing password; warnings: %v", result.Warnings)
 	}
 }
+
+// ── Comment lines, separators, no-scheme URLs, indentation ────────────────
+// These tests cover the exact examples from the user-facing docs and are
+// specifically designed to catch inputs that trip up parsers in the wild.
+
+// TestCurlRW_78 through TestCurlRW_87 are the 10 examples from the spec.
+
+func TestCurlRW_78_PostHTTPSPortCommentLine(t *testing.T) {
+	// #-comment line immediately before curl command must be ignored.
+	cmd := "# POST with HTTPS, domain, port, JSON body\n" +
+		"curl -X POST https://example.com:8080/api/users \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"name\": \"John Doe\", \"email\": \"john@example.com\"}'"
+	runCurlCase(t, curlCase{
+		name: "comment + POST https port",
+		cmd:  cmd, method: "POST", host: "example.com:8080",
+		path: "/api/users", scheme: "https",
+		headers:      map[string]string{"Content-Type": "application/json"},
+		bodyContains: "John Doe",
+	})
+}
+
+func TestCurlRW_79_GetHTTPIPNoPort(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "GET http IP no port",
+		cmd:    "curl -X GET http://192.168.1.100/api/users",
+		method: "GET", host: "192.168.1.100", path: "/api/users", scheme: "http",
+	})
+}
+
+func TestCurlRW_80_PutHTTPSLocalhostPort(t *testing.T) {
+	cmd := "curl -X PUT https://localhost:3000/api/users/1 \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"name\": \"Jane Doe\", \"email\": \"jane@example.com\"}'"
+	runCurlCase(t, curlCase{
+		name: "PUT https localhost port",
+		cmd:  cmd, method: "PUT", host: "localhost:3000",
+		path: "/api/users/1", scheme: "https",
+		bodyContains: "Jane Doe",
+	})
+}
+
+func TestCurlRW_81_PostHTTPIPPort(t *testing.T) {
+	cmd := "curl -X POST http://10.0.0.5:9090/api/users \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"name\": \"Alice\", \"email\": \"alice@example.com\"}'"
+	runCurlCase(t, curlCase{
+		name: "POST http IP port",
+		cmd:  cmd, method: "POST", host: "10.0.0.5:9090",
+		path: "/api/users", scheme: "http",
+		bodyContains: "Alice",
+	})
+}
+
+func TestCurlRW_82_GetNoSchemeDomain(t *testing.T) {
+	// No scheme, bare domain — host must still be extracted.
+	runCurlCase(t, curlCase{
+		name:   "GET no scheme domain",
+		cmd:    "curl example.com/api/users",
+		method: "GET", host: "example.com", path: "/api/users",
+	})
+}
+
+func TestCurlRW_83_PutHTTPDomainPort(t *testing.T) {
+	cmd := "curl -X PUT http://api.myservice.org:5000/api/users/42 \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"email\": \"updated@example.com\"}'"
+	runCurlCase(t, curlCase{
+		name: "PUT http domain port",
+		cmd:  cmd, method: "PUT", host: "api.myservice.org:5000",
+		path: "/api/users/42", scheme: "http",
+		bodyContains: "updated@example.com",
+	})
+}
+
+func TestCurlRW_84_GetHTTPSLocalhostNoPort(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "GET https localhost no port",
+		cmd:    "curl https://localhost/api/users/1",
+		method: "GET", host: "localhost", path: "/api/users/1", scheme: "https",
+	})
+}
+
+func TestCurlRW_85_PostNoSchemeLocalhostPort(t *testing.T) {
+	// No scheme, localhost:port — host must be extracted.
+	cmd := "curl -X POST localhost:8080/api/users \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"name\": \"Bob\", \"email\": \"bob@test.com\"}'"
+	runCurlCase(t, curlCase{
+		name: "POST no scheme localhost port",
+		cmd:  cmd, method: "POST", host: "localhost:8080",
+		path:         "/api/users",
+		bodyContains: "Bob",
+	})
+}
+
+func TestCurlRW_86_GetHTTPIPPort(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "GET http IP port",
+		cmd:    "curl http://127.0.0.1:4000/api/users",
+		method: "GET", host: "127.0.0.1:4000", path: "/api/users", scheme: "http",
+	})
+}
+
+func TestCurlRW_87_PutNoSchemeIPNoPort(t *testing.T) {
+	// No scheme, bare IP — host must be extracted.
+	cmd := "curl -X PUT 192.168.0.50/api/users/3 \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"name\": \"Charlie\"}'"
+	runCurlCase(t, curlCase{
+		name: "PUT no scheme IP no port",
+		cmd:  cmd, method: "PUT", host: "192.168.0.50",
+		path:         "/api/users/3",
+		bodyContains: "Charlie",
+	})
+}
+
+// ── Comment / separator / indentation robustness ──────────────────────────
+
+func TestCurlRW_88_CommentLineIgnored(t *testing.T) {
+	// Multiple comment lines above the command must all be ignored.
+	cmd := "# GET with HTTP, IP address, no port\n" +
+		"# second comment line\n" +
+		"curl -X GET http://192.168.1.100/api/users"
+	runCurlCase(t, curlCase{
+		name: "multiple comment lines",
+		cmd:  cmd, method: "GET", host: "192.168.1.100", path: "/api/users",
+	})
+}
+
+func TestCurlRW_89_MarkdownSeparatorIgnored(t *testing.T) {
+	// "---" separator line between examples must not produce warnings.
+	cmd := "---\ncurl https://api.example.com/users\n---"
+	result := ParseCurl(cmd)
+	if result.Request == nil {
+		t.Fatalf("expected request; warnings: %v", result.Warnings)
+	}
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "unknown curl flag") {
+			t.Errorf("--- produced spurious warning: %q", w)
+		}
+	}
+}
+
+func TestCurlRW_90_LeadingTrailingBlankLines(t *testing.T) {
+	cmd := "\n\ncurl -X DELETE https://api.example.com/users/5\n\n"
+	runCurlCase(t, curlCase{
+		name: "leading and trailing blank lines",
+		cmd:  cmd, method: "DELETE", host: "api.example.com", path: "/users/5",
+	})
+}
+
+func TestCurlRW_91_IndentedContinuation(t *testing.T) {
+	// Indented flags after \ continuation must parse correctly.
+	cmd := "curl -X POST https://api.example.com/events \\\n" +
+		"    -H \"Content-Type: application/json\" \\\n" +
+		"    -H \"X-Api-Key: k_123\" \\\n" +
+		"    -d '{\"event\":\"login\"}'"
+	runCurlCase(t, curlCase{
+		name: "indented backslash continuation",
+		cmd:  cmd, method: "POST", host: "api.example.com", path: "/events",
+		headers:      map[string]string{"Content-Type": "application/json", "X-Api-Key": "k_123"},
+		bodyContains: "login",
+	})
+}
+
+func TestCurlRW_92_FullDocBlockWithCommentAndSeparator(t *testing.T) {
+	// Simulates exactly what a user pastes: comment + command + separator.
+	cmd := "# PUT with no scheme, IP address, no port\n" +
+		"curl -X PUT 192.168.0.50/api/users/3 \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"name\": \"Charlie\"}'"
+	runCurlCase(t, curlCase{
+		name: "full doc block comment+cmd",
+		cmd:  cmd, method: "PUT", host: "192.168.0.50", path: "/api/users/3",
+		bodyContains: "Charlie",
+	})
+}

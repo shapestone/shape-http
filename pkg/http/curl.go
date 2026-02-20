@@ -52,7 +52,22 @@ import "github.com/shapestone/shape-http/internal/fastparser"
 // # Multi-line commands
 //
 // Lines ending with a backslash (\) are joined before parsing, so commands
-// copied from a terminal work without modification.
+// copied from a terminal work without modification. Remaining bare newlines
+// (e.g. leading or trailing blank lines) are also treated as whitespace.
+//
+// # Comment and separator lines
+//
+// Lines whose first non-whitespace character is '#' are stripped before
+// parsing, as are markdown separator lines consisting only of '-' characters
+// (e.g. "---"). This means commands pasted from README files or API docs
+// together with their surrounding commentary parse correctly.
+//
+// # URLs without a scheme
+//
+// If the URL has no "http://" or "https://" prefix the host is still
+// extracted from the authority component (e.g. "example.com/api",
+// "localhost:8080/path", "192.168.0.50/path" all produce the correct
+// Host header and path).
 func ParseCurl(cmd string) *ParseResult {
 	internal := fastparser.ParseCurl(cmd)
 
