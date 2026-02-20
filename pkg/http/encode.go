@@ -4,7 +4,9 @@ import (
 	"io"
 )
 
-// Encoder writes HTTP messages to an output stream.
+// Encoder writes HTTP messages to an output stream in HTTP/1.1 wire format.
+// A single Encoder is not safe for concurrent use; create one per goroutine
+// or serialize access externally.
 type Encoder struct {
 	w io.Writer
 }

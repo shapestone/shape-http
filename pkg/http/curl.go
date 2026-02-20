@@ -98,11 +98,6 @@ func ParseCurl(cmd string) *ParseResult {
 			Headers: convertHeaders(internal.Request.Headers),
 			Body:    internal.Request.Body,
 		}
-		for _, w := range internal.Warnings {
-			if w == "message body is incomplete" {
-				result.Partial = true
-			}
-		}
 	}
 
 	return result

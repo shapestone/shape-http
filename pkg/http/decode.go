@@ -9,7 +9,9 @@ import (
 	"strings"
 )
 
-// Decoder reads HTTP messages from an input stream.
+// Decoder reads HTTP messages from an input stream in HTTP/1.1 wire format.
+// A single Decoder is not safe for concurrent use; create one per goroutine
+// or serialize access externally.
 type Decoder struct {
 	r *bufio.Reader
 }

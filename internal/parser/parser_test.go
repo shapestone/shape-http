@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/shapestone/shape-core/pkg/ast"
+	"github.com/shapestone/shape-http/internal/fastparser"
 )
 
 func TestParse_Request(t *testing.T) {
@@ -248,5 +249,56 @@ func TestNodeToResponse_HeadersNotArray(t *testing.T) {
 	_, err := NodeToResponse(node)
 	if err == nil {
 		t.Error("NodeToResponse() = nil, want error when headers is not ArrayDataNode")
+	}
+}
+
+func TestRequestToNode_WithScheme(t *testing.T) {
+	// Exercise the `if req.Scheme != ""` branch in requestToNode and the
+	// corresponding "scheme" property read in NodeToRequest.
+	req := &fastparser.Request{
+		Method:  "GET",
+		Path:    "/api",
+		Version: "HTTP/1.1",
+		Scheme:  "https",
+		Headers: []fastparser.Header{{Key: "Host", Value: "example.com"}},
+	}
+	node := requestToNode(req)
+	obj, ok := node.(*ast.ObjectNode)
+	if !ok {
+		t.Fatalf("expected ObjectNode, got %T", node)
+	}
+	schemeProp, ok := obj.Properties()["scheme"]
+	if !ok {
+		t.Fatal("scheme key missing from ObjectNode")
+	}
+	lit, ok := schemeProp.(*ast.LiteralNode)
+	if !ok {
+		t.Fatalf("scheme expected LiteralNode, got %T", schemeProp)
+	}
+	if lit.Value() != "https" {
+		t.Errorf("scheme = %v, want https", lit.Value())
+	}
+
+	// Also round-trip through NodeToRequest to cover the scheme-read branch.
+	req2, err := NodeToRequest(node)
+	if err != nil {
+		t.Fatalf("NodeToRequest() error = %v", err)
+	}
+	if req2.Scheme != "https" {
+		t.Errorf("Scheme = %q, want https", req2.Scheme)
+	}
+}
+
+func TestRequestToNode_SchemeAbsent(t *testing.T) {
+	// When Scheme is empty the "scheme" key must not appear in the ObjectNode.
+	req := &fastparser.Request{
+		Method:  "GET",
+		Path:    "/",
+		Version: "HTTP/1.1",
+	}
+	node := requestToNode(req)
+	obj := node.(*ast.ObjectNode)
+	if _, ok := obj.Properties()["scheme"]; ok {
+		t.Error("scheme key present in ObjectNode but Scheme was empty")
 	}
 }

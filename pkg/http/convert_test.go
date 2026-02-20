@@ -175,3 +175,54 @@ func TestNodeToInterface_UnknownType(t *testing.T) {
 		t.Errorf("NodeToInterface(nil) = %v, want nil", result)
 	}
 }
+
+func TestRequestToNode_WithScheme(t *testing.T) {
+	// Scheme must appear in the AST when set, and round-trip back.
+	req := &Request{
+		Method:  "GET",
+		Path:    "/api/users",
+		Version: "HTTP/1.1",
+		Scheme:  "https",
+		Headers: Headers{{Key: "Host", Value: "example.com"}},
+	}
+	node := RequestToNode(req)
+	obj := node.(*ast.ObjectNode)
+	props := obj.Properties()
+
+	schemeLit, ok := props["scheme"]
+	if !ok {
+		t.Fatal("scheme missing from AST node")
+	}
+	if schemeLit.(*ast.LiteralNode).Value() != "https" {
+		t.Errorf("scheme = %v, want https", schemeLit.(*ast.LiteralNode).Value())
+	}
+
+	// Round-trip
+	req2, err := NodeToRequest(node)
+	if err != nil {
+		t.Fatalf("NodeToRequest() error = %v", err)
+	}
+	if req2.Scheme != "https" {
+		t.Errorf("Scheme = %q, want https", req2.Scheme)
+	}
+}
+
+func TestRequestToNode_SchemeAbsentWhenEmpty(t *testing.T) {
+	// When Scheme is empty the "scheme" key must not appear in the AST.
+	req := &Request{Method: "GET", Path: "/", Version: "HTTP/1.1"}
+	node := RequestToNode(req)
+	obj := node.(*ast.ObjectNode)
+	if _, ok := obj.Properties()["scheme"]; ok {
+		t.Error("scheme key present in AST but Scheme was empty")
+	}
+}
+
+func TestRequestToNode_BodyAbsentWhenNil(t *testing.T) {
+	// When Body is nil the "body" key must not appear in the AST.
+	req := &Request{Method: "GET", Path: "/", Version: "HTTP/1.1"}
+	node := RequestToNode(req)
+	obj := node.(*ast.ObjectNode)
+	if _, ok := obj.Properties()["body"]; ok {
+		t.Error("body key present in AST but Body was nil")
+	}
+}

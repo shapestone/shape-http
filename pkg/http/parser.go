@@ -31,6 +31,8 @@ func Parse(input string) (ast.SchemaNode, error) {
 }
 
 // ParseReader reads all data from r and parses it as an HTTP message into an AST.
+// The full message is buffered before parsing; for large messages prefer
+// Unmarshal or NewDecoder.
 func ParseReader(r io.Reader) (ast.SchemaNode, error) {
 	data, err := readAll(r)
 	if err != nil {

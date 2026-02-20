@@ -503,10 +503,11 @@ func stripNonCurlLines(cmd string) string {
 	return strings.Join(kept, "\n")
 }
 
-// expandShortFlags expands compound short flags (e.g. -sS → -s -S, -vk → -v -k).
-// If a flag that takes an argument appears inside a compound (e.g. -XPOST),
-// the remaining characters become that flag's argument, matching curl behaviour.
-// Flags that already start with "--" or that are a single char are left unchanged.
+// expandShortFlags expands compound short flags into individual tokens.
+// Examples: -sS → [-s, -S], -vk → [-v, -k], -XPOST → [-X, POST].
+// When a char that takes an argument is encountered, the remaining characters
+// in the compound become that argument (curl behaviour). Tokens that start
+// with "--", consist of a single char, or start with '-#' are passed through.
 func expandShortFlags(tokens []string) []string {
 	// Single-char flags that consume the next token as their argument.
 	shortArgFlags := map[byte]bool{
@@ -519,7 +520,6 @@ func expandShortFlags(tokens []string) []string {
 		// Only expand tokens of the form -(two or more letters/digits).
 		if len(tok) > 2 && tok[0] == '-' && tok[1] != '-' && tok[1] != '#' {
 			chars := tok[1:]
-			expanded := false
 			for i := 0; i < len(chars); i++ {
 				c := chars[i]
 				out = append(out, "-"+string(c))
@@ -528,13 +528,8 @@ func expandShortFlags(tokens []string) []string {
 					if i+1 < len(chars) {
 						out = append(out, chars[i+1:])
 					}
-					expanded = true
 					break
 				}
-				expanded = true
-			}
-			if !expanded {
-				out = append(out, tok)
 			}
 		} else {
 			out = append(out, tok)

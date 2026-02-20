@@ -49,7 +49,10 @@ type Header struct {
 }
 
 // Headers is an ordered, repeatable list of HTTP headers.
-// HTTP headers are case-insensitive by spec but we preserve original case.
+// HTTP headers are case-insensitive per RFC 9110 §5.1; this type preserves
+// the original case of each header name while performing all lookups
+// case-insensitively. Multiple headers with the same name are supported
+// (e.g. Set-Cookie).
 type Headers []Header
 
 // Get returns the first header value for the given key (case-insensitive).
@@ -64,6 +67,7 @@ func (h Headers) Get(key string) string {
 }
 
 // Values returns all header values for the given key (case-insensitive).
+// Returns nil if no matching header is found.
 func (h Headers) Values(key string) []string {
 	var vals []string
 	for _, hdr := range h {
@@ -141,9 +145,14 @@ func (h Headers) IsChunked() bool {
 }
 
 // Message is the interface shared by Request and Response.
+// It provides a uniform way to access the common fields of both message types,
+// useful for writing generic middleware or utilities that process any HTTP message.
 type Message interface {
+	// GetVersion returns the HTTP version string (e.g. "HTTP/1.1").
 	GetVersion() string
+	// GetHeaders returns the ordered list of headers.
 	GetHeaders() Headers
+	// GetBody returns the raw body bytes, or nil if no body.
 	GetBody() []byte
 }
 
@@ -177,10 +186,16 @@ type Unmarshaler interface {
 	UnmarshalHTTP([]byte) error
 }
 
-// ParseResult holds the result of lenient parsing.
+// ParseResult holds the result of a lenient or curl parse.
+//
+// Exactly one of Request and Response is non-nil (unless parsing failed
+// entirely, in which case both may be nil). Warnings lists any non-fatal
+// issues encountered (malformed headers, unsupported flags, etc.). Partial
+// is true when the message was truncated or could not be fully parsed —
+// callers should still inspect the partially-extracted Request or Response.
 type ParseResult struct {
-	Request  *Request  // non-nil if request detected
-	Response *Response // non-nil if response detected
-	Warnings []string  // non-fatal issues
-	Partial  bool      // true if message was incomplete/truncated
+	Request  *Request  // non-nil if a request was detected
+	Response *Response // non-nil if a response was detected
+	Warnings []string  // non-fatal issues encountered during parsing
+	Partial  bool      // true if the message was incomplete or truncated
 }

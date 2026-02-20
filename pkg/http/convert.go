@@ -5,7 +5,8 @@ import (
 	"github.com/shapestone/shape-http/internal/parser"
 )
 
-// NodeToRequest converts an AST ObjectNode to a Request.
+// NodeToRequest converts an AST ObjectNode (as produced by Parse or ParseLenient)
+// to a Request. Returns an error if node is not an ObjectNode.
 func NodeToRequest(node ast.SchemaNode) (*Request, error) {
 	fpReq, err := parser.NodeToRequest(node)
 	if err != nil {
@@ -21,7 +22,8 @@ func NodeToRequest(node ast.SchemaNode) (*Request, error) {
 	}, nil
 }
 
-// NodeToResponse converts an AST ObjectNode to a Response.
+// NodeToResponse converts an AST ObjectNode (as produced by Parse or ParseLenient)
+// to a Response. Returns an error if node is not an ObjectNode.
 func NodeToResponse(node ast.SchemaNode) (*Response, error) {
 	fpResp, err := parser.NodeToResponse(node)
 	if err != nil {
@@ -38,7 +40,9 @@ func NodeToResponse(node ast.SchemaNode) (*Response, error) {
 
 var zeroPos = ast.Position{}
 
-// RequestToNode converts a Request to an AST ObjectNode.
+// RequestToNode converts a Request to an AST ObjectNode suitable for use with
+// Render, ParseLenient, or shape-core transforms. The "scheme" and "body"
+// properties are omitted when empty/nil.
 func RequestToNode(req *Request) ast.SchemaNode {
 	props := map[string]ast.SchemaNode{
 		"type":    ast.NewLiteralNode("request", zeroPos),
@@ -56,7 +60,9 @@ func RequestToNode(req *Request) ast.SchemaNode {
 	return ast.NewObjectNode(props, zeroPos)
 }
 
-// ResponseToNode converts a Response to an AST ObjectNode.
+// ResponseToNode converts a Response to an AST ObjectNode suitable for use with
+// Render, ParseLenient, or shape-core transforms. The "body" property is omitted
+// when nil.
 func ResponseToNode(resp *Response) ast.SchemaNode {
 	props := map[string]ast.SchemaNode{
 		"type":       ast.NewLiteralNode("response", zeroPos),
@@ -71,7 +77,11 @@ func ResponseToNode(resp *Response) ast.SchemaNode {
 	return ast.NewObjectNode(props, zeroPos)
 }
 
-// NodeToInterface converts an AST node to native Go types.
+// NodeToInterface recursively converts an AST node to native Go types:
+//   - LiteralNode  → the underlying value (string, int64, float64, bool, etc.)
+//   - ArrayDataNode → []interface{}
+//   - ObjectNode   → map[string]interface{}
+//   - nil or unknown node type → nil
 func NodeToInterface(node ast.SchemaNode) interface{} {
 	switch n := node.(type) {
 	case *ast.LiteralNode:
