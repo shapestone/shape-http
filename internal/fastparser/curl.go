@@ -246,8 +246,14 @@ func (cp *curlParser) parse(cmd string) *ParseResult {
 		}
 	}
 
-	// Parse the URL into scheme, host, path components.
-	scheme, host, path := parseCurlURL(rawURL)
+	// Parse the URL into scheme, userinfo, host, path components.
+	scheme, userinfo, host, path := parseCurlURL(rawURL)
+
+	// Credentials embedded in the URL (user:pass@host) → Authorization: Basic.
+	if userinfo != "" && !curlHeadersHas(headers, "Authorization") {
+		encoded := base64.StdEncoding.EncodeToString([]byte(userinfo))
+		headers = append(headers, Header{Key: "Authorization", Value: "Basic " + encoded})
+	}
 
 	// Inject Host header (prepend so it appears first, matching lenient behaviour).
 	if host != "" && !curlHeadersHas(headers, "Host") {
@@ -287,9 +293,11 @@ func parseCurlHeader(s string) Header {
 	}
 }
 
-// parseCurlURL extracts (scheme, host, path) from a raw URL string.
-// If no scheme is found the entire string is returned as the path.
-func parseCurlURL(rawURL string) (scheme, host, path string) {
+// parseCurlURL extracts (scheme, userinfo, host, path) from a raw URL string.
+// userinfo is non-empty when the URL contains embedded credentials
+// (e.g. "https://user:pass@host/path"). If no scheme is found the host is
+// still extracted from the bare authority form (e.g. "example.com/api").
+func parseCurlURL(rawURL string) (scheme, userinfo, host, path string) {
 	// Strip URL fragment (#...) — fragments are never sent in HTTP requests.
 	if i := strings.IndexByte(rawURL, '#'); i >= 0 {
 		rawURL = rawURL[:i]
@@ -306,24 +314,35 @@ func parseCurlURL(rawURL string) (scheme, host, path string) {
 		// No scheme present.
 		if strings.HasPrefix(rawURL, "/") {
 			// Already an absolute path — no host component.
-			return "", "", rawURL
+			return "", "", "", rawURL
 		}
 		// Bare host or host/path: "example.com/api", "localhost:8080/api",
 		// "192.168.0.50/api/users". Split at the first slash.
 		slashIdx := strings.IndexByte(rawURL, '/')
 		if slashIdx < 0 {
-			// e.g. "example.com" — host only, root path.
-			return "", rawURL, "/"
+			return "", "", rawURL, "/"
 		}
-		return "", rawURL[:slashIdx], rawURL[slashIdx:]
+		return "", "", rawURL[:slashIdx], rawURL[slashIdx:]
 	}
 
-	slashIdx := strings.IndexByte(rawURL, '/')
-	if slashIdx < 0 {
-		// e.g. "https://example.com" — no path component.
-		return scheme, rawURL, "/"
+	// rawURL is now the authority+path (scheme prefix already stripped).
+	// Split authority from path at the first slash.
+	authority := rawURL
+	path = "/"
+	if slashIdx := strings.IndexByte(rawURL, '/'); slashIdx >= 0 {
+		authority = rawURL[:slashIdx]
+		path = rawURL[slashIdx:]
 	}
-	return scheme, rawURL[:slashIdx], rawURL[slashIdx:]
+
+	// Extract userinfo (user:pass@) from the authority if present.
+	if atIdx := strings.IndexByte(authority, '@'); atIdx >= 0 {
+		userinfo = authority[:atIdx]
+		host = authority[atIdx+1:]
+	} else {
+		host = authority
+	}
+
+	return scheme, userinfo, host, path
 }
 
 // curlHeadersHas reports whether headers contains a header with key (case-insensitive).

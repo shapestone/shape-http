@@ -945,6 +945,159 @@ func TestCurlRW_77_UserNoPassword(t *testing.T) {
 	}
 }
 
+// ── Authentication ─────────────────────────────────────────────────────────
+
+func TestCurlRW_Auth01_BasicFlagWithPort(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "basic auth -u with port",
+		cmd:    "curl -u username:password https://example.com:8080/api/users",
+		method: "GET", host: "example.com:8080", path: "/api/users", scheme: "https",
+		headers: map[string]string{"Authorization": "Basic dXNlcm5hbWU6cGFzc3dvcmQ="},
+	})
+}
+
+func TestCurlRW_Auth02_BasicInURL(t *testing.T) {
+	// Credentials embedded in URL: user:pass@host → Authorization: Basic header,
+	// Host header must not contain the userinfo part.
+	runCurlCase(t, curlCase{
+		name:   "basic auth in URL",
+		cmd:    "curl https://username:password@example.com/api/users",
+		method: "GET", host: "example.com", path: "/api/users", scheme: "https",
+		headers: map[string]string{"Authorization": "Basic dXNlcm5hbWU6cGFzc3dvcmQ="},
+	})
+}
+
+func TestCurlRW_Auth03_BasicInURLWithPort(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "basic auth in URL with port",
+		cmd:    "curl http://username:password@192.168.1.100:3000/api/users",
+		method: "GET", host: "192.168.1.100:3000", path: "/api/users", scheme: "http",
+		headers: map[string]string{"Authorization": "Basic dXNlcm5hbWU6cGFzc3dvcmQ="},
+	})
+}
+
+func TestCurlRW_Auth04_BasicHeaderPreEncoded(t *testing.T) {
+	// Pre-encoded Authorization header passed directly via -H.
+	runCurlCase(t, curlCase{
+		name:   "basic auth header pre-encoded",
+		cmd:    `curl -H "Authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=" http://192.168.1.100:3000/api/users`,
+		method: "GET", host: "192.168.1.100:3000", path: "/api/users", scheme: "http",
+		headers: map[string]string{"Authorization": "Basic dXNlcm5hbWU6cGFzc3dvcmQ="},
+	})
+}
+
+func TestCurlRW_Auth05_BearerHeader(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "bearer token header",
+		cmd:    `curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." https://api.example.com/api/users`,
+		method: "GET", host: "api.example.com", path: "/api/users", scheme: "https",
+		headers: map[string]string{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."},
+	})
+}
+
+func TestCurlRW_Auth06_BearerWithPost(t *testing.T) {
+	cmd := "curl -X POST https://localhost:8080/api/users \\\n" +
+		`  -H "Authorization: Bearer mytoken123" ` + "\\\n" +
+		`  -H "Content-Type: application/json" ` + "\\\n" +
+		`  -d '{"name": "John Doe", "email": "john@example.com"}'`
+	runCurlCase(t, curlCase{
+		name: "bearer + POST with body",
+		cmd:  cmd, method: "POST", host: "localhost:8080", path: "/api/users", scheme: "https",
+		headers: map[string]string{
+			"Authorization": "Bearer mytoken123",
+			"Content-Type":  "application/json",
+		},
+		bodyContains: "John Doe",
+	})
+}
+
+func TestCurlRW_Auth07_APIKeyHeader(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "API key in header",
+		cmd:    `curl -H "X-API-Key: abc123def456" http://10.0.0.5:9090/api/users`,
+		method: "GET", host: "10.0.0.5:9090", path: "/api/users", scheme: "http",
+		headers: map[string]string{"X-API-Key": "abc123def456"},
+	})
+}
+
+func TestCurlRW_Auth08_APIKeyQueryParam(t *testing.T) {
+	// API key in query string — must be preserved as part of the path.
+	runCurlCase(t, curlCase{
+		name:   "API key as query param",
+		cmd:    "curl https://example.com/api/users?api_key=abc123def456",
+		method: "GET", host: "example.com", path: "/api/users?api_key=abc123def456", scheme: "https",
+	})
+}
+
+func TestCurlRW_Auth09_OAuthHeader(t *testing.T) {
+	cmd := "curl -X PUT http://localhost:5000/api/users/1 \\\n" +
+		"  -H \"Authorization: OAuth oauth_consumer_key=\\\"key\\\",oauth_token=\\\"token\\\",oauth_signature=\\\"sig\\\"\" \\\n" +
+		"  -H \"Content-Type: application/json\" \\\n" +
+		"  -d '{\"name\": \"Updated Name\"}'"
+	result := ParseCurl(cmd)
+	if result.Request == nil {
+		t.Fatalf("expected request; warnings: %v", result.Warnings)
+	}
+	auth := result.Request.Headers.Get("Authorization")
+	if !strings.HasPrefix(auth, "OAuth ") {
+		t.Errorf("Authorization = %q, want OAuth prefix", auth)
+	}
+	if result.Request.Method != "PUT" {
+		t.Errorf("Method = %q, want PUT", result.Request.Method)
+	}
+}
+
+func TestCurlRW_Auth10_DigestFlag(t *testing.T) {
+	// --digest is a behaviour flag that cannot be simulated; it is silently
+	// ignored and the -u credentials are still encoded as Basic.
+	runCurlCase(t, curlCase{
+		name:   "--digest with -u",
+		cmd:    "curl --digest -u username:password http://192.168.0.50:8080/api/users",
+		method: "GET", host: "192.168.0.50:8080", path: "/api/users", scheme: "http",
+		headers: map[string]string{"Authorization": "Basic dXNlcm5hbWU6cGFzc3dvcmQ="},
+	})
+}
+
+func TestCurlRW_Auth11_ClientCert(t *testing.T) {
+	// --cert and --key are TLS options; we ignore them (no file access).
+	cmd := "curl --cert client.pem --key client-key.pem \\\n" +
+		"  https://example.com:443/api/users"
+	runCurlCase(t, curlCase{
+		name: "--cert --key ignored",
+		cmd:  cmd, method: "GET", host: "example.com:443", path: "/api/users", scheme: "https",
+	})
+}
+
+func TestCurlRW_Auth12_BearerViaColonU(t *testing.T) {
+	// GitHub-style: -u :token (empty username, token as password).
+	result := ParseCurl("curl -u :ghp_abc123tokenhere https://api.github.com/user")
+	if result.Request == nil {
+		t.Fatalf("expected request; warnings: %v", result.Warnings)
+	}
+	auth := result.Request.Headers.Get("Authorization")
+	if !strings.HasPrefix(auth, "Basic ") {
+		t.Errorf("Authorization = %q, want Basic prefix", auth)
+	}
+	if result.Request.Headers.Get("Host") != "api.github.com" {
+		t.Errorf("Host = %q, want api.github.com", result.Request.Headers.Get("Host"))
+	}
+}
+
+func TestCurlRW_Auth13_BasicInURLDoesNotExposeCreds(t *testing.T) {
+	// The Host header must never contain the user:pass@ portion.
+	result := ParseCurl("curl https://admin:s3cr3t@internal.example.com/api/data")
+	if result.Request == nil {
+		t.Fatalf("expected request; warnings: %v", result.Warnings)
+	}
+	host := result.Request.Headers.Get("Host")
+	if strings.Contains(host, "admin") || strings.Contains(host, "s3cr3t") || strings.Contains(host, "@") {
+		t.Errorf("Host header leaks credentials: %q", host)
+	}
+	if host != "internal.example.com" {
+		t.Errorf("Host = %q, want internal.example.com", host)
+	}
+}
+
 // ── Comment lines, separators, no-scheme URLs, indentation ────────────────
 // These tests cover the exact examples from the user-facing docs and are
 // specifically designed to catch inputs that trip up parsers in the wild.

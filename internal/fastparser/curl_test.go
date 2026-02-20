@@ -386,22 +386,26 @@ func TestShellSplit_UnclosedQuote(t *testing.T) {
 
 func TestParseCurlURL(t *testing.T) {
 	cases := []struct {
-		in     string
-		scheme string
-		host   string
-		path   string
+		in       string
+		scheme   string
+		userinfo string
+		host     string
+		path     string
 	}{
-		{"https://example.com/api", "https", "example.com", "/api"},
-		{"http://example.com/api?q=1", "http", "example.com", "/api?q=1"},
-		{"https://example.com:8080/path", "https", "example.com:8080", "/path"},
-		{"https://example.com", "https", "example.com", "/"},
-		{"/just/a/path", "", "", "/just/a/path"},
+		{"https://example.com/api", "https", "", "example.com", "/api"},
+		{"http://example.com/api?q=1", "http", "", "example.com", "/api?q=1"},
+		{"https://example.com:8080/path", "https", "", "example.com:8080", "/path"},
+		{"https://example.com", "https", "", "example.com", "/"},
+		{"/just/a/path", "", "", "", "/just/a/path"},
+		{"https://user:pass@example.com/api", "https", "user:pass", "example.com", "/api"},
+		{"http://user:pass@192.168.1.1:8080/path", "http", "user:pass", "192.168.1.1:8080", "/path"},
+		{"https://:token@api.github.com/user", "https", ":token", "api.github.com", "/user"},
 	}
 	for _, tc := range cases {
-		scheme, host, path := parseCurlURL(tc.in)
-		if scheme != tc.scheme || host != tc.host || path != tc.path {
-			t.Errorf("parseCurlURL(%q) = (%q, %q, %q), want (%q, %q, %q)",
-				tc.in, scheme, host, path, tc.scheme, tc.host, tc.path)
+		scheme, userinfo, host, path := parseCurlURL(tc.in)
+		if scheme != tc.scheme || userinfo != tc.userinfo || host != tc.host || path != tc.path {
+			t.Errorf("parseCurlURL(%q) = (%q, %q, %q, %q), want (%q, %q, %q, %q)",
+				tc.in, scheme, userinfo, host, path, tc.scheme, tc.userinfo, tc.host, tc.path)
 		}
 	}
 }
