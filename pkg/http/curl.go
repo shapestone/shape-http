@@ -10,6 +10,9 @@ import "github.com/shapestone/shape-http/internal/fastparser"
 // of any issues or unsupported flags encountered. Partial is true when the
 // command could not be fully parsed (e.g., missing URL).
 //
+// The leading "curl" word is optional — commands pasted without it (starting
+// directly with a flag or URL) are accepted.
+//
 // # Supported flags
 //
 //	-X / --request          HTTP method
@@ -20,14 +23,31 @@ import "github.com/shapestone/shape-http/internal/fastparser"
 //	-F / --form             multipart/form-data field (repeatable)
 //	--data-urlencode        URL-encoded form field (repeatable)
 //	-u / --user             Basic Auth → Authorization: Basic <base64>
+//	-b / --cookie           Cookie header value → Cookie: <value>
+//	-I / --head             Set method to HEAD
 //	--http2                 Set version to HTTP/2
 //	--http3                 Set version to HTTP/3
+//	--http1.0               Set version to HTTP/1.0
+//	--http1.1               Set version to HTTP/1.1
+//
+// # Compound short flags
+//
+// Multiple single-character flags may be combined into one token as curl
+// allows (e.g. -sS, -vk, -sLk, -XPOST). Each character is expanded and
+// processed individually before flag dispatch, so combined flags never
+// produce spurious "unknown flag" warnings.
 //
 // # Silently ignored flags
 //
-//	-v / --verbose, -s / --silent, -L / --location, --compressed,
-//	-k / --insecure, -i / --include, -o / --output, -A / --user-agent,
+//	-v / --verbose, -s / --silent, -S / --show-error,
+//	-L / --location, --compressed, -k / --insecure,
+//	-i / --include, -O, -o / --output, -A / --user-agent,
 //	and other display/behaviour flags that do not affect the request.
+//
+// # URL fragments
+//
+// Fragments (#section) are stripped from the URL before building the
+// request path because they are never sent over the wire.
 //
 // # Multi-line commands
 //
