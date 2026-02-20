@@ -57,6 +57,9 @@ func (cp *curlParser) parse(cmd string) *ParseResult {
 		tokens = tokens[1:]
 	}
 
+	// Expand compound short flags like -sS → [-s, -S] before the main loop.
+	tokens = expandShortFlags(tokens)
+
 	var (
 		method         string
 		rawURL         string
@@ -116,9 +119,18 @@ func (cp *curlParser) parse(cmd string) *ParseResult {
 				urlEncFields = append(urlEncFields, v)
 			}
 
+		// Cookie header.
+		case "-b", "--cookie":
+			if v, ok := next(); ok {
+				headers = append(headers, Header{Key: "Cookie", Value: v})
+			}
+
 		// Basic auth — convert to Authorization: Basic header.
 		case "-u", "--user":
 			if v, ok := next(); ok {
+				if !strings.ContainsRune(v, ':') {
+					cp.warn(fmt.Sprintf("-u %q: no colon found; encoding username only (password was not provided)", v))
+				}
 				encoded := base64.StdEncoding.EncodeToString([]byte(v))
 				headers = append(headers, Header{Key: "Authorization", Value: "Basic " + encoded})
 			}
@@ -142,10 +154,12 @@ func (cp *curlParser) parse(cmd string) *ParseResult {
 		// Flags that are silently ignored (no argument).
 		case "-v", "--verbose",
 			"-s", "--silent",
+			"-S", "--show-error",
 			"-L", "--location",
 			"--compressed",
 			"-k", "--insecure",
 			"-i", "--include",
+			"-O", // write to file named by remote
 			"-g", "--globoff",
 			"--no-keepalive",
 			"--fail", "-f",
@@ -260,6 +274,11 @@ func parseCurlHeader(s string) Header {
 // parseCurlURL extracts (scheme, host, path) from a raw URL string.
 // If no scheme is found the entire string is returned as the path.
 func parseCurlURL(rawURL string) (scheme, host, path string) {
+	// Strip URL fragment (#...) — fragments are never sent in HTTP requests.
+	if i := strings.IndexByte(rawURL, '#'); i >= 0 {
+		rawURL = rawURL[:i]
+	}
+
 	switch {
 	case strings.HasPrefix(rawURL, "https://"):
 		scheme = "https"
@@ -416,6 +435,46 @@ func buildURLEncoded(fields []string) string {
 		}
 	}
 	return strings.Join(parts, "&")
+}
+
+// expandShortFlags expands compound short flags (e.g. -sS → -s -S, -vk → -v -k).
+// If a flag that takes an argument appears inside a compound (e.g. -XPOST),
+// the remaining characters become that flag's argument, matching curl behaviour.
+// Flags that already start with "--" or that are a single char are left unchanged.
+func expandShortFlags(tokens []string) []string {
+	// Single-char flags that consume the next token as their argument.
+	shortArgFlags := map[byte]bool{
+		'X': true, 'H': true, 'd': true, 'F': true,
+		'u': true, 'o': true, 'A': true, 'e': true,
+		'm': true, 'w': true, 'x': true, 'b': true,
+	}
+	out := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		// Only expand tokens of the form -(two or more letters/digits).
+		if len(tok) > 2 && tok[0] == '-' && tok[1] != '-' && tok[1] != '#' {
+			chars := tok[1:]
+			expanded := false
+			for i := 0; i < len(chars); i++ {
+				c := chars[i]
+				out = append(out, "-"+string(c))
+				if shortArgFlags[c] {
+					// Rest of the compound is the inline argument (e.g. -XPOST → -X POST).
+					if i+1 < len(chars) {
+						out = append(out, chars[i+1:])
+					}
+					expanded = true
+					break
+				}
+				expanded = true
+			}
+			if !expanded {
+				out = append(out, tok)
+			}
+		} else {
+			out = append(out, tok)
+		}
+	}
+	return out
 }
 
 // percentEncode percent-encodes a string per RFC 3986 unreserved characters.

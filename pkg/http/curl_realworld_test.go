@@ -716,3 +716,231 @@ func TestCurlRW_58_HTTP2PriorKnowledge(t *testing.T) {
 		version: "HTTP/2", method: "GET",
 	})
 }
+
+// ── Compound short flags ───────────────────────────────────────────────────
+
+func TestCurlRW_59_CompoundSS(t *testing.T) {
+	// -sS = --silent --show-error: both ignored, request still parsed.
+	runCurlCase(t, curlCase{
+		name:   "-sS compound ignored",
+		cmd:    `curl -sS https://api.example.com/status`,
+		method: "GET", host: "api.example.com", path: "/status",
+	})
+	result := ParseCurl(`curl -sS https://api.example.com/status`)
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "unknown curl flag") {
+			t.Errorf("compound flag -sS produced unexpected warning: %q", w)
+		}
+	}
+}
+
+func TestCurlRW_60_CompoundVK(t *testing.T) {
+	// -vk = --verbose --insecure: both ignored.
+	runCurlCase(t, curlCase{
+		name:   "-vk compound ignored",
+		cmd:    `curl -vk -X DELETE https://dev.example.com/cache`,
+		method: "DELETE", host: "dev.example.com", path: "/cache",
+	})
+	result := ParseCurl(`curl -vk -X DELETE https://dev.example.com/cache`)
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "unknown curl flag") {
+			t.Errorf("compound flag -vk produced unexpected warning: %q", w)
+		}
+	}
+}
+
+func TestCurlRW_61_CompoundSLK(t *testing.T) {
+	// -sLk = --silent --location --insecure: all ignored.
+	runCurlCase(t, curlCase{
+		name:   "-sLk compound ignored",
+		cmd:    `curl -sLk https://short.example.com/abc`,
+		method: "GET", host: "short.example.com", path: "/abc",
+	})
+}
+
+func TestCurlRW_62_CompoundSSKV(t *testing.T) {
+	// -sSKv compound with multiple ignored flags.
+	runCurlCase(t, curlCase{
+		name:         "-sSvk + POST with body",
+		cmd:          `curl -sSvk -X POST https://api.example.com/events -H "Content-Type: application/json" -d '{"ev":"click"}'`,
+		method:       "POST",
+		path:         "/events",
+		host:         "api.example.com",
+		bodyContains: "click",
+	})
+}
+
+func TestCurlRW_63_CompoundSO_Download(t *testing.T) {
+	// -O (capital O) = write output to named file: ignored.
+	runCurlCase(t, curlCase{
+		name:   "-O download flag ignored",
+		cmd:    `curl -O https://api.example.com/export.json`,
+		method: "GET", host: "api.example.com", path: "/export.json",
+	})
+}
+
+func TestCurlRW_64_CompoundSXInline(t *testing.T) {
+	// -XPOST as a single token (method inline in compound, curl behaviour).
+	runCurlCase(t, curlCase{
+		name:   "-XPOST inline method",
+		cmd:    `curl -XPOST https://api.example.com/users -H "Content-Type: application/json" -d '{"name":"Eve"}'`,
+		method: "POST", host: "api.example.com", path: "/users",
+		bodyContains: "Eve",
+	})
+}
+
+// ── Cookie flag ────────────────────────────────────────────────────────────
+
+func TestCurlRW_65_CookieFlag(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "-b cookie string",
+		cmd:    `curl -b "session=abc123; theme=dark" https://api.example.com/dashboard`,
+		method: "GET", host: "api.example.com", path: "/dashboard",
+		headers: map[string]string{"Cookie": "session=abc123; theme=dark"},
+	})
+}
+
+func TestCurlRW_66_CookieLongFlag(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "--cookie long flag",
+		cmd:    `curl --cookie "csrf=tok42" https://api.example.com/form`,
+		method: "GET", host: "api.example.com", path: "/form",
+		headers: map[string]string{"Cookie": "csrf=tok42"},
+	})
+}
+
+func TestCurlRW_67_CookieWithPost(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:         "-b + POST with body",
+		cmd:          `curl -X POST https://api.example.com/session/refresh -H "Authorization: Bearer tok" -b "session_id=sess_789" -d '{}'`,
+		method:       "POST",
+		host:         "api.example.com",
+		path:         "/session/refresh",
+		bodyContains: "{}",
+		headers: map[string]string{
+			"Authorization": "Bearer tok",
+			"Cookie":        "session_id=sess_789",
+		},
+	})
+}
+
+// ── URL fragments ──────────────────────────────────────────────────────────
+
+func TestCurlRW_68_FragmentStripped(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "URL fragment stripped from path",
+		cmd:    `curl https://api.example.com/docs#section-3`,
+		method: "GET", host: "api.example.com", path: "/docs",
+	})
+}
+
+func TestCurlRW_69_FragmentWithQuery(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "URL query + fragment: fragment stripped",
+		cmd:    `curl "https://api.example.com/search?q=go#results"`,
+		method: "GET", host: "api.example.com", path: "/search?q=go",
+	})
+}
+
+func TestCurlRW_70_FragmentOnlyAfterSlash(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "bare path fragment",
+		cmd:    `curl "https://example.com/#hero"`,
+		method: "GET", host: "example.com", path: "/",
+	})
+}
+
+// ── IPv6 URLs ──────────────────────────────────────────────────────────────
+
+func TestCurlRW_71_IPv6Loopback(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "IPv6 loopback with port",
+		cmd:    `curl http://[::1]:8080/api/ping`,
+		method: "GET", path: "/api/ping",
+		host: "[::1]:8080", scheme: "http",
+	})
+}
+
+func TestCurlRW_72_IPv6FullAddress(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "IPv6 full address",
+		cmd:    `curl -X GET "http://[2001:db8::1]/api/v1/status" -H "Accept: application/json"`,
+		method: "GET", path: "/api/v1/status",
+		host: "[2001:db8::1]", scheme: "http",
+		headers: map[string]string{"Accept": "application/json"},
+	})
+}
+
+func TestCurlRW_73_IPv6NoPort(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "IPv6 loopback no port",
+		cmd:    `curl https://[::1]/health`,
+		method: "GET", path: "/health",
+		host: "[::1]", scheme: "https",
+	})
+}
+
+// ── No "curl" prefix ───────────────────────────────────────────────────────
+
+func TestCurlRW_74_NoCurlPrefixWithMethod(t *testing.T) {
+	// User pastes just the flags from a curl command, without the word "curl".
+	runCurlCase(t, curlCase{
+		name:         "no curl prefix, flags first",
+		cmd:          `-X POST https://api.example.com/webhook -H "Content-Type: application/json" -H "X-Secret: whs_abc" -d '{"event":"push"}'`,
+		method:       "POST",
+		host:         "api.example.com",
+		path:         "/webhook",
+		bodyContains: "push",
+		headers: map[string]string{
+			"Content-Type": "application/json",
+			"X-Secret":     "whs_abc",
+		},
+	})
+}
+
+func TestCurlRW_75_NoCurlPrefixURLFirst(t *testing.T) {
+	// URL is first token, no "curl" word at all.
+	runCurlCase(t, curlCase{
+		name:   "no curl prefix, URL first",
+		cmd:    `https://api.example.com/users -H "Accept: application/json"`,
+		method: "GET", host: "api.example.com", path: "/users",
+		headers: map[string]string{"Accept": "application/json"},
+	})
+}
+
+func TestCurlRW_76_NoCurlPrefixBearerGet(t *testing.T) {
+	runCurlCase(t, curlCase{
+		name:   "no curl prefix, bearer token, GET",
+		cmd:    `-H "Authorization: Bearer eyJ.tok" -H "Accept: application/json" https://api.example.com/v1/profile`,
+		method: "GET", host: "api.example.com", path: "/v1/profile",
+		headers: map[string]string{
+			"Authorization": "Bearer eyJ.tok",
+			"Accept":        "application/json",
+		},
+	})
+}
+
+// ── -u without password ────────────────────────────────────────────────────
+
+func TestCurlRW_77_UserNoPassword(t *testing.T) {
+	// -u username without colon: parser warns and encodes username only.
+	result := ParseCurl(`curl -u john https://api.example.com/account`)
+	if result.Request == nil {
+		t.Fatalf("expected request, got nil; warnings: %v", result.Warnings)
+	}
+	// Should still produce an Authorization header.
+	if result.Request.Headers.Get("Authorization") == "" {
+		t.Error("expected Authorization header even with username-only -u")
+	}
+	// Should warn about missing password.
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "no colon") || strings.Contains(w, "password") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about missing password; warnings: %v", result.Warnings)
+	}
+}
