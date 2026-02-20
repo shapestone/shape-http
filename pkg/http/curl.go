@@ -13,6 +13,19 @@ import "github.com/shapestone/shape-http/internal/fastparser"
 // The leading "curl" word is optional — commands pasted without it (starting
 // directly with a flag or URL) are accepted.
 //
+// # Authentication
+//
+// The following auth patterns are supported and produce the correct headers:
+//
+//	-u user:pass            → Authorization: Basic <base64(user:pass)>
+//	-u :token               → Authorization: Basic <base64(:token)>  (GitHub pattern)
+//	https://user:pass@host  → Authorization: Basic <base64(user:pass)>, Host: host
+//	-H "Authorization: Bearer <token>"   → passed through as-is
+//	-H "Authorization: OAuth ..."        → passed through as-is
+//	-H "X-API-Key: <key>"               → passed through as-is
+//	--digest                → silently ignored (digest challenge cannot be simulated)
+//	--cert / --key          → silently ignored (TLS options, no file access)
+//
 // # Supported flags
 //
 //	-X / --request          HTTP method

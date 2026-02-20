@@ -13,6 +13,26 @@ import (
 // (not both), depending on auto-detection. Warnings contains human-readable
 // descriptions of any issues encountered. Partial is true if the message
 // was incomplete or truncated.
+//
+// # Authentication
+//
+// Authentication headers are parsed as ordinary HTTP headers and are available
+// via result.Request.Headers.Get. All standard schemes are supported:
+//
+//	result.Request.Headers.Get("Authorization")   // "Basic ...", "Bearer ...", "OAuth ..."
+//	result.Request.Headers.Get("X-API-Key")       // "abc123def456"
+//	result.Request.Headers.Get("X-Session-Token") // "sess_xyz789"
+//
+// Query-string API keys are preserved as part of result.Request.Path:
+//
+//	// GET /api/users?api_key=abc123  →  result.Request.Path = "/api/users?api_key=abc123"
+//
+// The lenient parser additionally accepts:
+//   - Absolute-form request targets (e.g. "GET https://example.com/path HTTP/1.1"),
+//     extracting the scheme into result.Request.Scheme and the host into
+//     result.Request.Headers.Get("Host").
+//   - Bare LF line endings in addition to CRLF.
+//   - Missing HTTP version (defaults to "HTTP/1.1").
 func UnmarshalLenient(data []byte) *ParseResult {
 	lp := fastparser.NewLenientParser(data)
 	internal := lp.Parse()

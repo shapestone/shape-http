@@ -13,6 +13,21 @@ import (
 // based on whether data starts with "HTTP/" (response) or not (request).
 //
 // This function uses a high-performance fast path that bypasses AST construction.
+//
+// # Authentication
+//
+// Authentication headers are parsed as ordinary HTTP headers and are available
+// via req.Headers.Get. All standard schemes are supported:
+//
+//	req.Headers.Get("Authorization")   // "Basic dXNlcm5hbWU6cGFzc3dvcmQ="
+//	req.Headers.Get("Authorization")   // "Bearer eyJhbGci..."
+//	req.Headers.Get("Authorization")   // "OAuth oauth_consumer_key=..."
+//	req.Headers.Get("X-API-Key")       // "abc123def456"
+//	req.Headers.Get("X-Session-Token") // "sess_xyz789"
+//
+// Query-string API keys are preserved as part of req.Path:
+//
+//	// GET /api/users?api_key=abc123 HTTP/1.1  →  req.Path = "/api/users?api_key=abc123"
 func Unmarshal(data []byte, v interface{}) error {
 	if v == nil {
 		return fmt.Errorf("http: Unmarshal(nil)")
@@ -44,6 +59,8 @@ func Unmarshal(data []byte, v interface{}) error {
 }
 
 // UnmarshalRequest parses HTTP wire-format data as a request.
+// Authentication headers are accessible via req.Headers.Get("Authorization"),
+// req.Headers.Get("X-API-Key"), etc. See Unmarshal for details.
 func UnmarshalRequest(data []byte) (*Request, error) {
 	req := &Request{}
 	if err := unmarshalRequest(data, req); err != nil {
