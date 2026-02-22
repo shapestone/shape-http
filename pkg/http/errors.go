@@ -3,6 +3,13 @@ package http
 import "fmt"
 
 // ParseError represents an error that occurred during HTTP message parsing.
+// It is a terminal error type — it does not wrap another error, so Unwrap
+// returns nil. Use errors.As to extract a *ParseError from an error chain:
+//
+//	var pe *ParseError
+//	if errors.As(err, &pe) {
+//	    fmt.Printf("parse failed at line %d: %s\n", pe.Line, pe.Message)
+//	}
 type ParseError struct {
 	Message  string // human-readable error message
 	Line     int    // 1-indexed line number where error occurred (0 if unknown)

@@ -165,6 +165,17 @@ func (r *Request) GetHeaders() Headers { return r.Headers }
 // GetBody returns the body bytes.
 func (r *Request) GetBody() []byte { return r.Body }
 
+// String returns the HTTP/1.1 wire-format representation of the request.
+// It is equivalent to calling Marshal and is provided for convenience when
+// logging or debugging. If serialization fails, a compact fallback is returned.
+func (r *Request) String() string {
+	b, err := Marshal(r)
+	if err != nil {
+		return "Request{" + r.Method + " " + r.Path + " " + r.Version + "}"
+	}
+	return string(b)
+}
+
 // GetVersion returns the HTTP version string.
 func (r *Response) GetVersion() string { return r.Version }
 
@@ -173,6 +184,17 @@ func (r *Response) GetHeaders() Headers { return r.Headers }
 
 // GetBody returns the body bytes.
 func (r *Response) GetBody() []byte { return r.Body }
+
+// String returns the HTTP/1.1 wire-format representation of the response.
+// It is equivalent to calling Marshal and is provided for convenience when
+// logging or debugging. If serialization fails, a compact fallback is returned.
+func (r *Response) String() string {
+	b, err := Marshal(r)
+	if err != nil {
+		return "Response{" + strconv.Itoa(r.StatusCode) + " " + r.Reason + "}"
+	}
+	return string(b)
+}
 
 // Marshaler is the interface implemented by types that can marshal themselves
 // into valid HTTP wire format.

@@ -1,6 +1,8 @@
 package http
 
 import (
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -273,5 +275,67 @@ func TestParseError(t *testing.T) {
 	e3 := &ParseError{Message: "generic error"}
 	if e3.Error() != "http: generic error" {
 		t.Errorf("Error() = %q", e3.Error())
+	}
+}
+
+func TestParseError_ErrorsAs(t *testing.T) {
+	// ParseError is returned by Marshal when the request is invalid
+	// (e.g. empty method). errors.As must extract it from the error chain.
+	req := &Request{Method: "", Path: "/", Version: "HTTP/1.1"}
+	_, err := Marshal(req)
+	if err == nil {
+		t.Fatal("expected error for request with empty method")
+	}
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("errors.As(*ParseError) = false, want true; err = %v", err)
+	}
+	if pe.Message == "" {
+		t.Error("ParseError.Message is empty")
+	}
+}
+
+func TestRequest_String(t *testing.T) {
+	req := &Request{
+		Method:  "GET",
+		Path:    "/api/users",
+		Version: "HTTP/1.1",
+		Headers: Headers{{Key: "Host", Value: "example.com"}},
+	}
+	s := req.String()
+	if !strings.Contains(s, "GET /api/users HTTP/1.1") {
+		t.Errorf("String() missing request line: %q", s)
+	}
+	if !strings.Contains(s, "Host: example.com") {
+		t.Errorf("String() missing Host header: %q", s)
+	}
+}
+
+func TestResponse_String(t *testing.T) {
+	resp := &Response{
+		Version:    "HTTP/1.1",
+		StatusCode: 200,
+		Reason:     "OK",
+		Headers:    Headers{{Key: "Content-Type", Value: "text/plain"}},
+		Body:       []byte("hello"),
+	}
+	s := resp.String()
+	if !strings.Contains(s, "HTTP/1.1 200 OK") {
+		t.Errorf("String() missing status line: %q", s)
+	}
+	if !strings.Contains(s, "Content-Type: text/plain") {
+		t.Errorf("String() missing Content-Type header: %q", s)
+	}
+	if !strings.Contains(s, "hello") {
+		t.Errorf("String() missing body: %q", s)
+	}
+}
+
+func TestRequest_String_Fallback(t *testing.T) {
+	// Empty method triggers a Marshal error → fallback string.
+	req := &Request{Path: "/", Version: "HTTP/1.1"}
+	s := req.String()
+	if !strings.Contains(s, "/") {
+		t.Errorf("String() fallback missing path: %q", s)
 	}
 }
