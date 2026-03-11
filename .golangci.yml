@@ -37,10 +37,6 @@ linters:
           arguments:
             - "checkPrivateReceivers"
             - "sayRepetitiveInsteadOfStutters"
-    gofmt:
-      simplify: true
-    stylecheck:
-      checks: ["all", "-ST1000", "-ST1003"]
     gocritic:
       enabled-tags:
         - diagnostic
@@ -62,6 +58,3 @@ linters:
           - dupl
           - gosec
           - funlen
-
-output:
-  sort-results: true
