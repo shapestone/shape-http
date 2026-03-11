@@ -10,18 +10,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           path: shape-http
 
       - name: Checkout shape-core
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           repository: shapestone/shape-core
           path: shape-core
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.23'
           check-latest: true
@@ -55,7 +55,7 @@ jobs:
           fi
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: ./shape-http/coverage.out
           fail_ci_if_error: false
@@ -69,27 +69,26 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           path: shape-http
 
       - name: Checkout shape-core
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           repository: shapestone/shape-core
           path: shape-core
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.23'
           check-latest: true
           cache-dependency-path: shape-http/go.sum
 
       - name: Run linter
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
           working-directory: shape-http
-          skip-pkg-cache: true
-          skip-build-cache: true
+          skip-cache: true
