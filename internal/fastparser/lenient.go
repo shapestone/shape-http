@@ -624,7 +624,7 @@ func isHostnameLike(b []byte) bool {
 		return false
 	}
 	c0 := b[0]
-	if !((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || (c0 >= '0' && c0 <= '9')) {
+	if (c0 < 'a' || c0 > 'z') && (c0 < 'A' || c0 > 'Z') && (c0 < '0' || c0 > '9') {
 		return false
 	}
 
