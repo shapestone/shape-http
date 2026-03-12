@@ -14,9 +14,16 @@
 
 **Repository:** github.com/shapestone/shape-http
 
-A high-performance HTTP/1.1 parser and marshaler for the [Shape Parser™](https://github.com/shapestone/shape) ecosystem.
+A high-performance HTTP/1.1 (Hypertext Transfer Protocol) parser and marshaler for the [Shape Parser™](https://github.com/shapestone/shape) ecosystem — a fast HTTP parser for Go without a full server stack.
 
 Parses and serializes HTTP/1.1 messages (RFC 7230/7231) with a dual-path architecture: a fast-path encoder that is **22x faster** than `net/http` for writes, and a fast-path parser that is **3x faster** for reads.
+
+## Who It's For
+
+- Developers building **HTTP proxies, load balancers, or reverse proxies** who need fast wire-format parsing
+- **Testing and debugging tools** that need to inspect or replay raw HTTP traffic
+- **API gateways and middleware** that parse HTTP messages at high throughput
+- Anyone embedding a **Go HTTP library** without pulling in a full HTTP server stack
 
 ## Installation
 
@@ -43,6 +50,26 @@ import shaphttp "github.com/shapestone/shape-http/pkg/http"
 >
 > When only shape-http is needed (e.g. a standalone parser or proxy), no alias is
 > required and you can import it directly as `http`.
+
+## Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make test` | Run all tests with the race detector |
+| `make lint` | Run golangci-lint static analysis |
+| `make build` | Build all packages |
+| `make coverage` | Generate HTML coverage report in `coverage/` |
+| `make all` | Run grammar-verify, test, lint, build, and coverage |
+| `make bench` | Run all benchmarks |
+| `make bench-report` | Run benchmarks and save results to `benchmarks/results.txt` |
+| `make bench-compare` | Run benchmarks 10× for statistical analysis via benchstat |
+| `make bench-profile` | Run benchmarks with CPU and memory profiling |
+| `make performance-report` | Generate `PERFORMANCE_REPORT.md` from benchmark history |
+| `make bench-history` | List available benchmark history runs |
+| `make bench-compare-history` | Compare current benchmarks vs most recent historical run |
+| `make grammar-test` | Run grammar verification tests only |
+| `make grammar-verify` | Verify that grammar files exist and are valid |
+| `make clean` | Remove generated coverage and benchmark files |
 
 ## Usage
 
@@ -191,6 +218,15 @@ shape-http implements:
 - [RFC 7231](https://datatracker.ietf.org/doc/html/rfc7231) — HTTP/1.1: Semantics and Content
 - Chunked transfer encoding (RFC 7230 §4.1)
 - Trailer fields (RFC 7230 §4.4)
+
+## Use Cases
+
+- **HTTP proxy / reverse proxy** — parse inbound requests and forward without full server overhead
+- **Traffic recording and replay** — capture and reconstruct HTTP messages from raw bytes
+- **API testing frameworks** — generate and assert on raw HTTP wire format
+- **Protocol fuzzing** — use lenient mode to parse intentionally malformed messages
+- **Log parsing** — extract structured data from HTTP traffic logs
+- **Embedded HTTP clients** — serialize requests without a full transport stack
 
 ## Related Projects
 
