@@ -41,16 +41,16 @@ git clone https://github.com/shapestone/shape-http.git
 cd shape-http
 
 # Run tests
-go test -race ./...
+make test      # run all tests with race detector
 
 # Run linter
-golangci-lint run
+make lint      # run golangci-lint
 
 # Check coverage
-go test -cover ./...
+make coverage  # generate coverage report
 
 # Run benchmarks
-go test -bench=. -benchmem ./pkg/http/
+make bench     # run benchmarks
 ```
 
 ### Dependencies
@@ -77,8 +77,8 @@ go work use ../shape-core  # if cloned alongside
 
 3. **Run tests and linting:**
    ```bash
-   go test -race ./...
-   golangci-lint run
+   make test   # run all tests with race detector
+   make lint   # run golangci-lint
    ```
 
 4. **Commit with clear messages** using [Conventional Commits](https://www.conventionalcommits.org/):
@@ -125,21 +125,13 @@ go work use ../shape-core  # if cloned alongside
 
 ```bash
 # All tests with race detector
-go test -race ./...
+make test
 
-# Specific package
-go test -race ./pkg/http/
-
-# With coverage
-go test -cover ./...
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-
-# With verbose output
-go test -v -race ./...
+# With coverage report
+make coverage
 
 # Benchmarks
-go test -bench=. -benchmem ./pkg/http/
+make bench
 
 # Compare with net/http stdlib
 go test -bench=BenchmarkStdlib -benchmem ./pkg/http/
@@ -170,7 +162,7 @@ func TestParseRequest(t *testing.T) {
 shape-http should be meaningfully faster than net/http. When adding new functionality, run benchmarks before and after to verify there is no regression:
 
 ```bash
-go test -bench=BenchmarkMarshal -benchmem -count=5 ./pkg/http/
+make bench
 ```
 
 ## Questions?
